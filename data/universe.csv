@@ -1,0 +1,25 @@
+label,name_pattern,style
+Citadel,CITADEL ADVISORS%,multi-manager
+Millennium,MILLENNIUM MANAGEMENT%,multi-manager
+Point72,POINT72 ASSET MANAGEMENT%,multi-manager
+Balyasny,BALYASNY ASSET MANAGEMENT%,multi-manager
+ExodusPoint,EXODUSPOINT CAPITAL%,multi-manager
+Schonfeld,SCHONFELD STRATEGIC ADVISORS%,multi-manager
+Verition,VERITION FUND MANAGEMENT%,multi-manager
+Two Sigma,TWO SIGMA INVESTMENTS%,quant
+D. E. Shaw,D. E. SHAW & CO%,quant
+Renaissance,RENAISSANCE TECHNOLOGIES%,quant
+AQR,AQR CAPITAL MANAGEMENT%,quant
+Man Group,MAN GROUP%,quant
+Bridgewater,BRIDGEWATER ASSOCIATES%,macro
+Tiger Global,TIGER GLOBAL MANAGEMENT%,tiger-cub
+Coatue,COATUE MANAGEMENT%,tiger-cub
+Viking Global,VIKING GLOBAL INVESTORS%,tiger-cub
+Lone Pine,LONE PINE CAPITAL%,tiger-cub
+Maverick,MAVERICK CAPITAL%,tiger-cub
+D1 Capital,D1 CAPITAL PARTNERS%,tiger-cub
+Elliott,ELLIOTT INVESTMENT MANAGEMENT%,activist
+Third Point,THIRD POINT%,activist
+Pershing Square,PERSHING SQUARE CAPITAL%,activist
+Appaloosa,APPALOOSA%,fundamental
+Baupost,BAUPOST GROUP%,fundamental
