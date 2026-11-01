@@ -32,7 +32,7 @@ class Paths:
 
     @property
     def db(self) -> Path:
-        return self.root / "crowding.duckdb"
+        return self.root / "ward.duckdb"
 
     @property
     def out(self) -> Path:
@@ -45,7 +45,7 @@ class Paths:
 
 
 def default_paths() -> Paths:
-    return Paths(Path(os.environ.get("CROWDING_DATA", "data"))).ensure()
+    return Paths(Path(os.environ.get("WARD_DATA", "data"))).ensure()
 
 
 def user_agent() -> str:

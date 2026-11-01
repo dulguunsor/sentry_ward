@@ -1,4 +1,4 @@
-"""Test fixtures. The sample data and its expected answers live in crowding.sample."""
+"""Test fixtures. The sample data and its expected answers live in sentryward.sample."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from crowding.sample import CUSIP, write_sample  # noqa: F401  (CUSIP re-exported for tests)
+from sentryward.sample import CUSIP, write_sample  # noqa: F401  (CUSIP re-exported for tests)
 
 
 @pytest.fixture

@@ -1,4 +1,4 @@
-"""Command line: crowding download | load | build | report."""
+"""Sentry Ward command line: ward sample | download | load | build | report."""
 
 from __future__ import annotations
 
@@ -24,14 +24,14 @@ def cmd_sample(args, paths):
     from .sample import write_sample
 
     write_sample(paths.raw)
-    print(f"Wrote 2 small sample data sets to {paths.raw}. Next: crowding load")
+    print(f"Wrote 2 small sample data sets to {paths.raw}. Next: ward load")
 
 
 def cmd_load(args, paths):
     con = _connect(paths)
     zips = list(paths.raw.glob("*_form13f.zip"))
     if not zips:
-        raise SystemExit(f"No *_form13f.zip files in {paths.raw}. Run `crowding download` first.")
+        raise SystemExit(f"No *_form13f.zip files in {paths.raw}. Run `ward download` first.")
     new = sec13f.load_all(con, zips, force=args.force)
     print(f"Loaded {len(new)} new files ({len(zips) - len(new)} already loaded).")
     counts = clean.build_all(con)
@@ -91,7 +91,7 @@ def cmd_report(args, paths):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="crowding", description=__doc__)
+    p = argparse.ArgumentParser(prog="ward", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
 
     d = sub.add_parser("download", help="download SEC 13F data set zips")

@@ -1,6 +1,6 @@
 """Small synthetic SEC 13F data sets with answers you can check by hand.
 
-Used by the tests and by `crowding sample`, so the pipeline can be tried
+Used by the tests and by `ward sample`, so the pipeline can be tried
 without downloading anything from SEC.
 
 Two files, in the two naming styles SEC has used:

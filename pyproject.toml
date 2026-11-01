@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "crowding-monitor"
+name = "sentry-ward"
 version = "0.1.0"
-description = "Measure hedge fund crowding from SEC Form 13F holdings."
+description = "Sentry Ward: reveal hidden hedge fund crowding from SEC Form 13F holdings."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -18,7 +18,7 @@ dependencies = [
 dev = ["pytest>=8"]
 
 [project.scripts]
-crowding = "crowding.cli:main"
+ward = "sentryward.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

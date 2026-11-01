@@ -1,7 +1,10 @@
-# Crowding Monitor
+# Sentry Ward
 
-Measures how much large hedge funds hold the same stocks, using the holdings they
-report to the SEC every quarter on Form 13F.
+Reveals when hedge funds that look independent are secretly holding the same stocks,
+using the holdings they report to the SEC every quarter on Form 13F.
+
+The name comes from Dota, where a sentry ward reveals invisible units. This tool does
+the same for crowding hidden behind diversification numbers.
 
 Multi-manager funds run many teams that are supposed to be independent. When those
 teams use the same data and models, they end up in the same trades, and a sell-off
@@ -25,19 +28,26 @@ Results are printed and written to `data/out/` as CSV and JSON.
 pip install -e ".[dev]"
 
 # Try it on small sample data (no download needed)
-export CROWDING_DATA=demo
-crowding sample
-crowding load
-crowding build
-crowding report
+export WARD_DATA=demo
+ward sample
+ward load
+ward build
+ward report
 
 # Real data from SEC
-export CROWDING_DATA=data
+export WARD_DATA=data
 export SEC_USER_AGENT="Your Name your.email@example.com"   # SEC requires this
-crowding download --since 2019     # several GB; files already on disk are skipped
-crowding load
-crowding build --universe data/universe.csv
-crowding report --period 2026-06-30
+ward download --since 2019     # several GB; files already on disk are skipped
+ward load
+ward build --universe data/universe.csv
+ward report --period 2026-06-30
+```
+
+On Windows PowerShell, set variables like this instead of `export`:
+
+```powershell
+$env:WARD_DATA = "data"
+$env:SEC_USER_AGENT = "Your Name your.email@example.com"
 ```
 
 ## Pipeline
@@ -79,7 +89,7 @@ crowding report --period 2026-06-30
 
 ## Fund universe
 
-`data/universe.csv` lists funds by name pattern. `crowding build` prints which SEC
+`data/universe.csv` lists funds by name pattern. `ward build` prints which SEC
 filers each pattern matched and which matched nothing. Check that list: names change
 over time and some firms file under several entities.
 

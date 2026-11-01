@@ -3,8 +3,8 @@ from __future__ import annotations
 import duckdb
 import pytest
 
-from crowding import clean, metrics, sec13f
-from crowding.cli import main
+from sentryward import clean, metrics, sec13f
+from sentryward.cli import main
 from conftest import CUSIP
 
 
@@ -199,7 +199,7 @@ def test_market_data_adds_ownership_and_days_to_exit(con, universe_csv):
 
 def test_cli_end_to_end(raw_dir, universe_csv, tmp_path, monkeypatch, capsys):
     data = tmp_path
-    monkeypatch.setenv("CROWDING_DATA", str(data))
+    monkeypatch.setenv("WARD_DATA", str(data))
     main(["load"])
     main(["build", "--universe", str(universe_csv)])
     main(["report", "--period", "2026-06-30", "--top", "5"])
