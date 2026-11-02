@@ -107,11 +107,19 @@ How it works:
 - The **crowded basket** is the top 30 stocks by crowding score in the latest quarter.
   Each one gets two **matched peers** from the same size quintile and beta tercile,
   closest in market value, the same matching the stress test uses.
-- Every two minutes the server fetches 5-minute bars from Yahoo Finance (delayed about
+- Every two minutes the server fetches 1-minute bars from Yahoo Finance (delayed about
   15 minutes) and computes today's return for both baskets since yesterday's close.
+- The chart and table switch between ranges: **1H, 3H** (1-minute bars), **1D** (5-minute),
+  **5D** (15-minute), and **1M, 3M, 1Y** (daily closes from Yahoo, refreshed every 15 minutes,
+  with today's live price as the last point). Your choice is remembered in the browser.
+  Yahoo has no bars shorter than 1 minute.
+- Hover the price chart for a crosshair with every value at that time, a history bar for
+  that day's spread and z-score, a table row for the stock's matched peers, and the
+  **i** icons for what each number means.
 - The **spread** is crowded minus peers. The z-score divides it by the standard
   deviation of the daily spread over the last 250 sessions. The screen shows an
-  **unwind warning** at z = -2 or lower.
+  **unwind warning** at z = -2 or lower. The z-score always uses today's move, whichever
+  chart range is selected.
 - The stress test did not find that crowded stocks fall harder in most sell-offs, so a
   warning is a reason to look closer, not a forecast.
 

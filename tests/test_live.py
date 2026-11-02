@@ -146,3 +146,59 @@ def test_flask_api(market, monkeypatch, tmp_path):
     app2 = server.create_app(m, live.meta(b, h))
     assert "npm run build" in app2.test_client().get("/").get_data(as_text=True)
     assert app2.test_client().get("/dashboard").status_code == 404
+
+
+def _selloff(b, h, con=None):
+    f = fake_quotes(-0.03, -0.005)
+    f.crowded = live.basket_symbols(b)[0]
+    cs, ps = live.basket_symbols(b)
+    syms = cs + ps + ["SPY"]
+    daily = live.db_daily(con, syms) if con is not None else None
+    return live.snapshot(f(syms), b, h["sigma"], daily)
+
+
+def test_intraday_ranges(market):
+    _, b, h = market
+    r = _selloff(b, h)["ranges"]
+    assert list(r) == ["1H", "3H", "1D", "5D"]               # no daily data passed
+    # 1D matches the headline numbers and keeps 5-minute bars.
+    assert r["1D"]["spread"] == pytest.approx(-0.025) and len(r["1D"]["path"]) == 78
+    # The last hour starts from the price an hour before the last bar (bar 66 of 78),
+    # so the move is the last 12/78 of the day's drift, measured from that price.
+    c0, c1 = 1 - 0.03 * 66 / 78, 1 - 0.03
+    assert r["1H"]["crowded"] == pytest.approx(c1 / c0 - 1)
+    assert len(r["1H"]["path"]) == 12 and r["1H"]["since"] == "since 14:55"
+    # Three hours, 36 bars. 5D has only two sessions here, so it starts from the first bar.
+    assert len(r["3H"]["path"]) == 36
+    assert r["5D"]["path"][0]["t"].startswith("Thu")
+    assert r["5D"]["crowded"] == pytest.approx(-0.03)
+    assert all(s["rel"] == pytest.approx(r["1H"]["spread"]) for s in r["1H"]["stocks"])
+
+
+def test_daily_ranges_use_live_price_for_today(market):
+    con, b, h = market
+    snap = _selloff(b, h, con)
+    r = snap["ranges"]
+    assert list(r) == ["1H", "3H", "1D", "5D", "1M", "3M", "1Y"]
+    assert len(r["1M"]["path"]) == 21 and len(r["3M"]["path"]) == 63 and len(r["1Y"]["path"]) == 252
+    # The last point of every daily range is today's live price, labelled with today's date.
+    assert r["1M"]["path"][-1]["t"] == "Apr 10"
+    assert r["1M"]["since"].startswith("since 2026-03")
+    json.dumps(snap, allow_nan=False)
+
+
+def test_monitor_fetches_daily_closes(market):
+    con, b, h = market
+    f = fake_quotes(-0.03, -0.005)
+    f.crowded = live.basket_symbols(b)[0]
+    calls = []
+
+    def daily_fetch(symbols):
+        calls.append(len(symbols))
+        return live.db_daily(con, symbols)
+
+    m = live.LiveMonitor(b, h, fetcher=f, daily_fetcher=daily_fetch, daily_every=3600)
+    m.refresh_once()
+    m.refresh_once()
+    assert calls == [91]                                   # once per daily_every, not every refresh
+    assert "1Y" in m.state()["snapshot"]["ranges"]

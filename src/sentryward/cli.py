@@ -95,11 +95,13 @@ def cmd_live(args, paths):
     except RuntimeError as e:
         raise SystemExit(f"Error: {e}")
     hist = live.history(con, baskets)
+    cs, ps = live.basket_symbols(baskets)
+    daily = live.db_daily(con, cs + ps + [stress.BENCHMARK])
     html = dashboard.render(dashboard.gather(con, paths.out))
     con.close()  # release the database so other commands can run while live mode is on
 
     interval = max(60, args.interval)
-    monitor = live.LiveMonitor(baskets, hist, interval=interval)
+    monitor = live.LiveMonitor(baskets, hist, interval=interval, daily=daily, daily_fetcher=live.yahoo_daily)
     monitor.start()
     app = server.create_app(monitor, live.meta(baskets, hist), html)
     url = f"http://{'localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host}:{args.port}/"

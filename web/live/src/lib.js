@@ -53,3 +53,28 @@ export function extent(values, pad = 0.12) {
 
 /** "2026-04-10T15:55:00-04:00" -> "15:55". */
 export const hhmm = (iso) => (iso ? iso.slice(11, 16) : "--:--");
+
+/** Index of the data point nearest to x, for n points spread evenly from x0 to x1. */
+export function nearestIndex(x, x0, x1, n) {
+  if (n <= 1) return 0;
+  const i = Math.round(((x - x0) / (x1 - x0)) * (n - 1));
+  return Math.max(0, Math.min(n - 1, i));
+}
+
+/** About k evenly spaced indexes into n points, always including the first and last. */
+export function labelIndexes(n, k = 6) {
+  if (n <= 0) return [];
+  if (n <= k) return [...Array(n).keys()];
+  const out = new Set();
+  for (let j = 0; j < k; j++) out.add(Math.round((j * (n - 1)) / (k - 1)));
+  return [...out];
+}
+
+export const RANGE_KEYS = ["1H", "3H", "1D", "5D", "1M", "3M", "1Y"];
+
+/** The range to show: the saved choice if the server has it, else 1D, else the first available. */
+export function pickRange(saved, available) {
+  if (available.includes(saved)) return saved;
+  if (available.includes("1D")) return "1D";
+  return available[0] ?? null;
+}

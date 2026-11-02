@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, it, test } from "vitest";
 import { extent, freshness, hhmm, pct, scale, ticks, zLevel } from "./lib.js";
 
 describe("pct", () => {
@@ -50,5 +50,31 @@ describe("chart helpers", () => {
   test("hhmm", () => {
     expect(hhmm("2026-04-10T15:55:00-04:00")).toBe("15:55");
     expect(hhmm(null)).toBe("--:--");
+  });
+});
+
+import { labelIndexes, nearestIndex, pickRange } from "./lib.js";
+
+describe("hover and ranges", () => {
+  it("maps a pointer position to the nearest point", () => {
+    expect(nearestIndex(0, 0, 100, 11)).toBe(0);
+    expect(nearestIndex(54, 0, 100, 11)).toBe(5);
+    expect(nearestIndex(500, 0, 100, 11)).toBe(10);
+    expect(nearestIndex(-20, 0, 100, 11)).toBe(0);
+    expect(nearestIndex(30, 0, 100, 1)).toBe(0);
+  });
+  it("spaces axis labels evenly and keeps both ends", () => {
+    expect(labelIndexes(3, 7)).toEqual([0, 1, 2]);
+    const l = labelIndexes(78, 7);
+    expect(l[0]).toBe(0);
+    expect(l[l.length - 1]).toBe(77);
+    expect(l.length).toBe(7);
+    expect(labelIndexes(0)).toEqual([]);
+  });
+  it("falls back to 1D when the saved range is missing", () => {
+    expect(pickRange("1Y", ["1H", "1D", "1Y"])).toBe("1Y");
+    expect(pickRange("1Y", ["1H", "3H", "1D", "5D"])).toBe("1D");
+    expect(pickRange("1M", ["1H"])).toBe("1H");
+    expect(pickRange("1D", [])).toBe(null);
   });
 });

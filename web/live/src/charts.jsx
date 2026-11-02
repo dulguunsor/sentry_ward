@@ -1,4 +1,5 @@
-import { extent, isNum, pct, scale, ticks } from "./lib.js";
+import { useRef, useState } from "react";
+import { extent, isNum, labelIndexes, nearestIndex, pct, scale, ticks } from "./lib.js";
 
 const C = { orange: "#f59e0b", cyan: "#0891b2", up: "#16a34a", down: "#dc2626", fg: "#e5e5e5", dim: "#8a8a8a", grid: "#525252" };
 
@@ -12,29 +13,83 @@ function Axis({ y, values, W, L, R }) {
   ));
 }
 
-/** Today's path: crowded basket and peer basket since yesterday's close. */
-export function IntradayChart({ path }) {
-  const W = 900, H = 280, L = 62, R = 64, T = 14, B = 28;
-  const ys = extent(path.flatMap((p) => [p.crowded, p.peers, p.spy]));
-  const x = scale([0, Math.max(1, path.length - 1)], [L, W - R]);
-  const y = scale(ys, [H - B, T]);
-  const line = (k) => path.map((p, i) => (isNum(p[k]) ? `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p[k]).toFixed(1)}` : "")).join("");
-  const last = path[path.length - 1] || {};
-  const labels = path.map((p, i) => [p.t, i]).filter(([t]) => t.endsWith(":00") || t.endsWith(":30")).filter((_, k) => k % 2 === 0);
+/** Tracks which data point the pointer is over. `toIndex` maps an x in viewBox units to an index. */
+function useHover(W, toIndex) {
+  const ref = useRef(null);
+  const [hover, setHover] = useState(null);
+  const onMove = (e) => {
+    const box = ref.current?.getBoundingClientRect();
+    if (!box || !box.width) return;
+    const vx = ((e.clientX - box.left) / box.width) * W;
+    setHover({ i: toIndex(vx), left: e.clientX - box.left, width: box.width });
+  };
+  return { ref, hover, handlers: { onPointerMove: onMove, onPointerDown: onMove, onPointerLeave: () => setHover(null) } };
+}
+
+function Tip({ hover, children }) {
+  if (!hover) return null;
+  const flip = hover.left > hover.width * 0.6;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Crowded basket and matched peers, return since yesterday's close">
-      <Axis y={y} values={ticks(ys[0], ys[1], 4)} W={W} L={L} R={R} />
-      {labels.map(([t, i]) => <text key={t} x={x(i)} y={H - 8} fill={C.dim} fontSize="11" textAnchor="middle">{t}</text>)}
-      <path d={line("spy")} fill="none" stroke={C.dim} strokeWidth="1.5" strokeDasharray="4 3" />
-      <path d={line("peers")} fill="none" stroke={C.cyan} strokeWidth="2" />
-      <path d={line("crowded")} fill="none" stroke={C.orange} strokeWidth="2.5" />
-      {["crowded", "peers"].map((k) => isNum(last[k]) && (
-        <g key={k}>
-          <circle cx={x(path.length - 1)} cy={y(last[k])} r="4" fill={k === "crowded" ? C.orange : C.cyan} />
-          <text x={x(path.length - 1) + 8} y={y(last[k]) + 4} fill={k === "crowded" ? C.orange : C.cyan} fontSize="12" fontWeight="700">{pct(last[k])}</text>
-        </g>
-      ))}
-    </svg>
+    <div className="charttip" style={flip ? { right: hover.width - hover.left + 14 } : { left: hover.left + 14 }}>
+      {children}
+    </div>
+  );
+}
+
+const Row = ({ color, label, v, cls }) => (
+  <div className="tiprow">
+    <span><i style={{ background: color }} />{label}</span>
+    <b className={cls ?? (isNum(v) ? (v < 0 ? "down" : "up") : "dim")}>{pct(v)}</b>
+  </div>
+);
+
+/** Crowded basket, matched peers and SPY over the selected range, with a hover crosshair. */
+export function PathChart({ path, since }) {
+  const W = 900, H = 280, L = 62, R = 64, T = 14, B = 28;
+  const n = path.length;
+  const ys = extent(path.flatMap((p) => [p.crowded, p.peers, p.spy]));
+  const x = scale([0, Math.max(1, n - 1)], [L, W - R]);
+  const y = scale(ys, [H - B, T]);
+  const { ref, hover, handlers } = useHover(W, (vx) => nearestIndex(vx, L, W - R, n));
+  const line = (k) => path.map((p, i) => (isNum(p[k]) ? `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p[k]).toFixed(1)}` : "")).join("");
+  const last = path[n - 1] || {};
+  const h = hover ? path[hover.i] : null;
+  return (
+    <div className="chartbox" ref={ref} {...handlers}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label={`Crowded basket and matched peers, return ${since}`}>
+        <Axis y={y} values={ticks(ys[0], ys[1], 4)} W={W} L={L} R={R} />
+        {labelIndexes(n, 7).map((i) => (
+          <text key={i} x={x(i)} y={H - 8} fill={C.dim} fontSize="11" textAnchor="middle">{path[i].t}</text>
+        ))}
+        <path d={line("spy")} fill="none" stroke={C.dim} strokeWidth="1.5" strokeDasharray="4 3" />
+        <path d={line("peers")} fill="none" stroke={C.cyan} strokeWidth="2" />
+        <path d={line("crowded")} fill="none" stroke={C.orange} strokeWidth="2.5" />
+        {!h && ["crowded", "peers"].map((k) => isNum(last[k]) && (
+          <g key={k}>
+            <circle cx={x(n - 1)} cy={y(last[k])} r="4" fill={k === "crowded" ? C.orange : C.cyan} />
+            <text x={x(n - 1) + 8} y={y(last[k]) + 4} fill={k === "crowded" ? C.orange : C.cyan} fontSize="12" fontWeight="700">{pct(last[k])}</text>
+          </g>
+        ))}
+        {h && (
+          <g>
+            <line x1={x(hover.i)} x2={x(hover.i)} y1={T} y2={H - B} stroke={C.fg} strokeOpacity="0.35" />
+            {[["spy", C.dim], ["peers", C.cyan], ["crowded", C.orange]].map(([k, c]) => isNum(h[k]) && (
+              <circle key={k} cx={x(hover.i)} cy={y(h[k])} r="4" fill={c} stroke="#080808" strokeWidth="1.5" />
+            ))}
+          </g>
+        )}
+      </svg>
+      <Tip hover={hover}>
+        {h && <>
+          <div className="tiphead">{h.t}</div>
+          <Row color={C.orange} label="Crowded" v={h.crowded} />
+          <Row color={C.cyan} label="Peers" v={h.peers} />
+          <Row color={C.dim} label="SPY" v={h.spy} />
+          <div className="tiprow sep"><span>Crowded − peers</span><b className={isNum(h.spread) && h.spread < 0 ? "down" : "up"}>{pct(h.spread)}</b></div>
+          <div className="tipnote">Return {since}</div>
+        </>}
+      </Tip>
+    </div>
   );
 }
 
@@ -47,24 +102,40 @@ export function HistoryChart({ history, sigma, alertZ, today }) {
   const bw = (W - L - R) / Math.max(1, pts.length);
   const y = scale(ys, [H - B, T]);
   const x = (i) => L + i * bw;
+  const { ref, hover, handlers } = useHover(W, (vx) => Math.max(0, Math.min(pts.length - 1, Math.floor((vx - L) / bw))));
   const months = pts.map((p, i) => [p.date.slice(0, 7), i]).filter(([m, i]) => i === 0 || m !== pts[i - 1].date.slice(0, 7));
+  const h = hover ? pts[hover.i] : null;
+  const z = h && isNum(sigma) ? h.spread / sigma : null;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Daily crowded minus peers spread with the alert line">
-      <Axis y={y} values={ticks(ys[0], ys[1], 4)} W={W} L={L} R={R} />
-      {band !== null && (
-        <g>
-          <line x1={L} x2={W - R} y1={y(band)} y2={y(band)} stroke={C.down} strokeDasharray="5 4" />
-          <text x={L + 6} y={y(band) - 6} fill={C.down} fontSize="11">ALERT LINE {alertZ}σ = {pct(band, 2)}</text>
-        </g>
-      )}
-      {pts.map((p, i) => (
-        <rect key={p.date} x={x(i) + 1} width={Math.max(1, bw - 2)}
-          y={Math.min(y(0), y(p.spread))} height={Math.abs(y(p.spread) - y(0))}
-          fill={p.today ? C.orange : p.spread < 0 ? C.down : C.up} fillOpacity={p.today ? 1 : 0.75} />
-      ))}
-      {months.filter(([m]) => m !== "TODAY").map(([m, i]) => (
-        <text key={m} x={x(i)} y={H - 8} fill={C.dim} fontSize="11">{m}</text>
-      ))}
-    </svg>
+    <div className="chartbox" ref={ref} {...handlers}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Daily crowded minus peers spread with the alert line">
+        <Axis y={y} values={ticks(ys[0], ys[1], 4)} W={W} L={L} R={R} />
+        {band !== null && (
+          <g>
+            <line x1={L} x2={W - R} y1={y(band)} y2={y(band)} stroke={C.down} strokeDasharray="5 4" />
+            <text x={L + 6} y={y(band) - 6} fill={C.down} fontSize="11">ALERT LINE {alertZ}σ = {pct(band, 2)}</text>
+          </g>
+        )}
+        {pts.map((p, i) => (
+          <rect key={p.date} x={x(i) + 1} width={Math.max(1, bw - 2)}
+            y={Math.min(y(0), y(p.spread))} height={Math.max(1, Math.abs(y(p.spread) - y(0)))}
+            fill={p.today ? C.orange : p.spread < 0 ? C.down : C.up}
+            fillOpacity={hover && hover.i !== i ? 0.35 : p.today ? 1 : 0.75} />
+        ))}
+        {months.filter(([m]) => m !== "TODAY").map(([m, i]) => (
+          <text key={m} x={x(i)} y={H - 8} fill={C.dim} fontSize="11">{m}</text>
+        ))}
+      </svg>
+      <Tip hover={hover}>
+        {h && <>
+          <div className="tiphead">{h.today ? "Today (live)" : h.date}</div>
+          {!h.today && <Row color={C.orange} label="Crowded" v={h.crowded} />}
+          {!h.today && <Row color={C.cyan} label="Peers" v={h.peers} />}
+          <div className="tiprow sep"><span>Crowded − peers</span><b className={h.spread < 0 ? "down" : "up"}>{pct(h.spread)}</b></div>
+          <div className="tiprow"><span>z-score</span><b className={isNum(z) && z <= alertZ ? "down" : ""}>{isNum(z) ? z.toFixed(2) : "--"}</b></div>
+          {isNum(z) && z <= alertZ && <div className="tipnote down">Below the alert line</div>}
+        </>}
+      </Tip>
+    </div>
   );
 }

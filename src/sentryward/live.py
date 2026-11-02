@@ -11,7 +11,8 @@ before any filing shows it. This module tracks that gap.
   z               spread / the standard deviation of the daily spread over the last
                   HIST_DAYS trading days; an alert when z <= ALERT_Z
 
-Quotes come from Yahoo Finance and are delayed about 15 minutes.
+Quotes come from Yahoo Finance and are delayed about 15 minutes. The chart can show
+any range in RANGES, from the last hour (1-minute bars) to the last year (daily closes).
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ HIST_DAYS = 250
 HIST_SHOWN = 60
 ALERT_Z = -2.0
 MARKET_TZ = "America/New_York"
+DAILY_EVERY = 900  # seconds between daily-close downloads
 
 
 def clean(v):
@@ -140,13 +142,12 @@ def history(con: duckdb.DuckDBPyConnection, baskets: dict, days: int = HIST_DAYS
 # ------------------------------------------------------------------ quotes
 
 
-def yahoo_intraday(symbols: list[str]) -> pd.DataFrame:
-    """5-minute bars for the last few sessions: columns symbol, ts, close."""
+def _yahoo(symbols: list[str], period: str, interval: str, adjust: bool) -> pd.DataFrame:
     import yfinance as yf
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        raw = yf.download(symbols, period="5d", interval="5m", group_by="ticker", auto_adjust=False,
+        raw = yf.download(symbols, period=period, interval=interval, group_by="ticker", auto_adjust=adjust,
                           prepost=False, threads=True, progress=False)
     frames = []
     if raw is not None and not raw.empty:
@@ -162,52 +163,161 @@ def yahoo_intraday(symbols: list[str]) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["symbol", "ts", "close"])
 
 
-def snapshot(bars: pd.DataFrame, baskets: dict, sigma: float | None) -> dict:
-    """Turn intraday bars into today's basket returns, the spread path and the alert."""
-    if bars is None or bars.empty:
-        return {"status": "no_data"}
-    b = bars.copy()
-    ts = pd.to_datetime(b["ts"], utc=True).dt.tz_convert(MARKET_TZ)
-    b["ts"], b["date"] = ts, ts.dt.date
-    session = b["date"].max()
-    prev_close = b[b["date"] < session].sort_values("ts").groupby("symbol")["close"].last()
-    today = b[b["date"] == session]
-    wide = today.pivot_table(index="ts", columns="symbol", values="close").sort_index().ffill()
-    rets = wide / prev_close.reindex(wide.columns) - 1
+def yahoo_intraday(symbols: list[str]) -> pd.DataFrame:
+    """1-minute bars for the last week of sessions (Yahoo's limit for 1-minute data): symbol, ts, close."""
+    return _yahoo(symbols, "7d", "1m", adjust=False)
+
+
+def yahoo_daily(symbols: list[str]) -> pd.DataFrame:
+    """Daily closes, adjusted for splits and dividends, for the last two years: symbol, date, close."""
+    d = _yahoo(symbols, "2y", "1d", adjust=True)
+    return pd.DataFrame({"symbol": d["symbol"], "date": pd.to_datetime(d["ts"]).dt.date, "close": d["close"]})
+
+
+def db_daily(con: duckdb.DuckDBPyConnection, symbols: list[str], days: int = 400) -> pd.DataFrame:
+    """Daily closes from the local database, used until the first Yahoo daily download arrives."""
+    return con.execute(
+        f"SELECT symbol, date, adj_close AS close FROM prices WHERE symbol IN ({','.join('?' * len(symbols))}) "
+        f"AND date > (SELECT max(date) FROM prices) - INTERVAL {int(days)} DAY ORDER BY symbol, date",
+        symbols,
+    ).df()
+
+
+# Chart ranges. Intraday ones use minute bars, the rest daily closes.
+#   key: (kind, length, bar, label format)
+RANGES = {
+    "1H": ("minutes", 60, "1min", "%H:%M"),
+    "3H": ("minutes", 180, "1min", "%H:%M"),
+    "1D": ("session", 1, "5min", "%H:%M"),
+    "5D": ("sessions", 5, "15min", "%a %H:%M"),
+    "1M": ("daily", 21, None, "%b %d"),
+    "3M": ("daily", 63, None, "%b %d"),
+    "1Y": ("daily", 252, None, "%b %Y"),
+}
+BAR_LABEL = {"1min": "1-minute bars", "5min": "5-minute bars", "15min": "15-minute bars", None: "daily closes"}
+
+
+def _last_close(rows: pd.DataFrame, key: str) -> pd.Series:
+    return rows.sort_values(key).groupby("symbol")["close"].last()
+
+
+def _window(rows: pd.DataFrame, key: str, base: pd.Series, bar: str | None, fmt: str, baskets: dict) -> dict | None:
+    """Equal-weight basket returns from `base` through every bar in `rows`."""
+    if rows.empty:
+        return None
+    r = rows.sort_values(key).copy()
+    if bar:
+        r[key] = r[key].dt.floor(bar)
+    wide = r.groupby([key, "symbol"])["close"].last().unstack().sort_index().ffill()
+    base = base.reindex(wide.columns).fillna(wide.bfill().iloc[0])  # no earlier close: start from the first one
+    rets = wide / base - 1
     cs, ps = basket_symbols(baskets)
     cs_ok = [s for s in cs if s in rets and rets[s].notna().any()]
     ps_ok = [s for s in ps if s in rets and rets[s].notna().any()]
+    if not cs_ok or not ps_ok:
+        return None
     path = pd.DataFrame({"crowded": rets[cs_ok].mean(axis=1), "peers": rets[ps_ok].mean(axis=1)})
     path["spread"] = path["crowded"] - path["peers"]
     if stress.BENCHMARK in rets:
         path["spy"] = rets[stress.BENCHMARK]
     path = path.dropna(subset=["spread"])
     if path.empty:
-        return {"status": "no_data", "session": str(session)}
-    last = path.iloc[-1]
-    z = float(last["spread"] / sigma) if sigma else None
+        return None
     lastrow = rets.iloc[-1]
+    tick = {p["symbol"]: p["ticker"] for p in baskets["peers"]}
     stocks = []
     for c in baskets["crowded"]:
-        r = lastrow.get(c["symbol"])
+        v = lastrow.get(c["symbol"])
+        ret = None if v is None or pd.isna(v) else float(v)
         pr = [lastrow.get(p) for p in c["peers"]]
-        pr = [x for x in pr if x is not None and not pd.isna(x)]
+        pr = [float(x) for x in pr if x is not None and not pd.isna(x)]
         peer = float(np.mean(pr)) if pr else None
-        stocks.append({"ticker": c["ticker"], "issuer": c["issuer"], "score": c["score"],
-                       "ret": None if r is None or pd.isna(r) else float(r),
-                       "peers_ret": peer,
-                       "rel": None if r is None or pd.isna(r) or peer is None else float(r) - peer})
+        stocks.append({"ticker": c["ticker"], "issuer": c["issuer"], "score": c["score"], "beta": c.get("beta"),
+                       "peers": [{"ticker": tick.get(p, p), "ret": None if pd.isna(lastrow.get(p, np.nan))
+                                  else float(lastrow.get(p))} for p in c["peers"]],
+                       "ret": ret, "peers_ret": peer, "rel": None if ret is None or peer is None else ret - peer})
+    last = path.iloc[-1]
+    return {
+        "bar": BAR_LABEL[bar],
+        "crowded": float(last["crowded"]), "peers": float(last["peers"]), "spread": float(last["spread"]),
+        "spy": float(last["spy"]) if "spy" in path and not pd.isna(last.get("spy")) else None,
+        "coverage": {"crowded": len(cs_ok), "crowded_total": len(cs), "peers": len(ps_ok), "peers_total": len(ps)},
+        "path": [{"t": pd.Timestamp(t).strftime(fmt),
+                  **{k: round(float(v), 6) for k, v in row.items() if not pd.isna(v)}}
+                 for t, row in path.iterrows()],
+        "stocks": stocks,
+    }
+
+
+def _intraday_ranges(b: pd.DataFrame, baskets: dict) -> dict:
+    sessions = sorted(b["date"].unique())
+    today = sessions[-1]
+    out = {}
+    for key, (kind, n, bar, fmt) in RANGES.items():
+        if kind == "minutes":
+            last_ts = b.loc[b["date"] == today, "ts"].max()
+            start = last_ts - pd.Timedelta(minutes=n)
+            rows, earlier = b[(b["date"] == today) & (b["ts"] > start)], b[b["ts"] <= start]
+            since = f"since {start.strftime('%H:%M')}" if start >= b.loc[b["date"] == today, "ts"].min() \
+                else "since yesterday's close"
+        elif kind == "session":
+            rows, earlier, since = b[b["date"] == today], b[b["date"] < today], "since yesterday's close"
+        elif kind == "sessions":
+            first = sessions[-n] if len(sessions) >= n else sessions[0]
+            rows, earlier = b[b["date"] >= first], b[b["date"] < first]
+            since = f"since the close before {first:%b %d}" if not earlier.empty else f"since {first:%b %d}"
+        else:
+            continue
+        w = _window(rows, "ts", _last_close(earlier, "ts"), bar, fmt, baskets)
+        if w:
+            out[key] = {**w, "since": since}
+    return out
+
+
+def _daily_ranges(daily: pd.DataFrame, live_close: pd.Series, session, baskets: dict) -> dict:
+    """Daily ranges, with today's latest intraday price standing in for today's close."""
+    d = daily[["symbol", "date", "close"]].copy()
+    d["date"] = pd.to_datetime(d["date"])
+    if session is not None and len(live_close):
+        sd = pd.Timestamp(session)
+        d = pd.concat([d[d["date"] != sd],
+                       pd.DataFrame({"symbol": live_close.index, "date": sd, "close": live_close.to_numpy()})])
+    dates = sorted(d["date"].unique())
+    out = {}
+    for key, (kind, n, bar, fmt) in RANGES.items():
+        if kind != "daily" or len(dates) < 2:
+            continue
+        first = dates[-n] if len(dates) >= n + 1 else dates[1]
+        rows, earlier = d[d["date"] >= first], d[d["date"] < first]
+        w = _window(rows, "date", _last_close(earlier, "date"), None, fmt, baskets)
+        if w:
+            out[key] = {**w, "since": f"since {pd.Timestamp(earlier['date'].max()):%Y-%m-%d}"}
+    return out
+
+
+def snapshot(bars: pd.DataFrame, baskets: dict, sigma: float | None, daily: pd.DataFrame | None = None) -> dict:
+    """Today's basket returns and the alert, plus the chart for every range in RANGES."""
+    if bars is None or bars.empty:
+        return {"status": "no_data"}
+    b = bars.copy()
+    ts = pd.to_datetime(b["ts"], utc=True).dt.tz_convert(MARKET_TZ)
+    b["ts"], b["date"] = ts, ts.dt.date
+    session = b["date"].max()
+    ranges = _intraday_ranges(b, baskets)
+    day = ranges.get("1D")
+    if day is None:
+        return {"status": "no_data", "session": str(session)}
+    if daily is not None and not daily.empty:
+        ranges.update(_daily_ranges(daily, _last_close(b[b["date"] == session], "ts"), session, baskets))
+    z = float(day["spread"] / sigma) if sigma else None
     return clean({
         "status": "ok",
         "session": str(session),
-        "as_of": path.index[-1].isoformat(),
-        "crowded": float(last["crowded"]), "peers": float(last["peers"]), "spread": float(last["spread"]),
-        "spy": float(last["spy"]) if "spy" in path and not pd.isna(last.get("spy")) else None,
+        "as_of": b.loc[b["date"] == session, "ts"].max().isoformat(),
+        "crowded": day["crowded"], "peers": day["peers"], "spread": day["spread"], "spy": day["spy"],
         "z": z, "alert": bool(z is not None and z <= ALERT_Z), "alert_z": ALERT_Z,
-        "coverage": {"crowded": len(cs_ok), "crowded_total": len(cs), "peers": len(ps_ok), "peers_total": len(ps)},
-        "path": [{"t": t.strftime("%H:%M"), **{k: float(v) for k, v in r.items() if not pd.isna(v)}}
-                 for t, r in path.iterrows()],
-        "stocks": stocks,
+        "coverage": day["coverage"], "path": day["path"], "stocks": day["stocks"],
+        "ranges": {k: ranges[k] for k in RANGES if k in ranges},
     })
 
 
@@ -218,10 +328,15 @@ class LiveMonitor:
     """Fetches quotes every `interval` seconds on a background thread and keeps the latest snapshot."""
 
     def __init__(self, baskets: dict, hist: dict, fetcher: Callable[[list[str]], pd.DataFrame] | None = None,
-                 interval: int = 120):
+                 interval: int = 120, daily: pd.DataFrame | None = None,
+                 daily_fetcher: Callable[[list[str]], pd.DataFrame] | None = None, daily_every: int = DAILY_EVERY):
         self.baskets, self.hist = baskets, hist
         self.fetcher = fetcher or yahoo_intraday
         self.interval = interval
+        self.daily = daily                      # starts from the database, then Yahoo replaces it
+        self.daily_fetcher = daily_fetcher
+        self.daily_every = daily_every
+        self._daily_at: float | None = None
         cs, ps = basket_symbols(baskets)
         self.symbols = cs + ps + [stress.BENCHMARK]
         self._lock = threading.Lock()
@@ -233,8 +348,16 @@ class LiveMonitor:
 
     def refresh_once(self) -> None:
         self._last_try = time.time()
+        if self.daily_fetcher and (self._daily_at is None or time.time() - self._daily_at >= self.daily_every):
+            self._daily_at = time.time()
+            try:
+                d = self.daily_fetcher(self.symbols)
+                if d is not None and not d.empty:
+                    self.daily = d
+            except Exception:  # daily ranges keep the older data; the intraday view is unaffected
+                pass
         try:
-            snap = snapshot(self.fetcher(self.symbols), self.baskets, self.hist.get("sigma"))
+            snap = snapshot(self.fetcher(self.symbols), self.baskets, self.hist.get("sigma"), self.daily)
             with self._lock:
                 self._latest, self._last_ok, self._error = snap, time.time(), None
         except Exception as e:  # keep serving the last good snapshot
