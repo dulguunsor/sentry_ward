@@ -107,15 +107,24 @@ def cusips_to_map(con: duckdb.DuckDBPyConnection) -> list[str]:
     return [r[0] for r in rows]
 
 
-def _parse_figi(cusip: str, result: dict) -> tuple:
+US_EXCH_CODES = ("US", "UN", "UW", "UQ", "UA", "UR", "UP", "UV", "UF")
+
+
+def _is_equity(d: dict) -> bool:
+    return ("common" in (d.get("securityType") or "").lower()
+            or (d.get("securityType2") or "").lower() in ("common stock", "depositary receipt"))
+
+
+def _parse_figi(cusip: str, result: dict, us_only: bool = False, miss: str = "not_found") -> tuple:
     data = result.get("data") or []
+    if us_only:
+        # Without an exchange filter OpenFIGI returns every listing worldwide; keep US
+        # ones, the composite "US" listing first, since Yahoo uses US tickers.
+        data = sorted((d for d in data if d.get("exchCode") in US_EXCH_CODES),
+                      key=lambda d: US_EXCH_CODES.index(d["exchCode"]))
     if not data:
-        return (cusip, None, None, None, None, None, "not_found")
-    pick = next(
-        (d for d in data if "common" in (d.get("securityType") or "").lower()
-         or (d.get("securityType2") or "").lower() in ("common stock", "depositary receipt")),
-        data[0],
-    )
+        return (cusip, None, None, None, None, None, miss)
+    pick = next((d for d in data if _is_equity(d)), data[0])
     ticker = pick.get("ticker")
     return (
         cusip, ticker, yahoo_symbol(ticker) if ticker else None, pick.get("figi"),
@@ -123,32 +132,27 @@ def _parse_figi(cusip: str, result: dict) -> tuple:
     )
 
 
-def map_cusips(
-    con: duckdb.DuckDBPyConnection,
-    session=None,
-    api_key: str | None = None,
-    log: Log = print,
-    sleep: Callable[[float], None] = time.sleep,
-) -> dict[str, int]:
-    """Map every unmapped CUSIP. Without an API key OpenFIGI allows about 25 requests
-    a minute of 10 CUSIPs each; a free key raises that to 100 CUSIPs per request."""
-    todo = cusips_to_map(con)
-    if not todo:
-        return {"requested": 0, "found": 0}
-    s = _session(session)
-    key = api_key or os.environ.get(OPENFIGI_KEY_ENV)
-    size, pause = (100, 0.25) if key else (10, 2.6)
-    headers = {"Content-Type": "application/json"}
-    if key:
-        headers["X-OPENFIGI-APIKEY"] = key
+def _first_pass_job(cusip: str) -> dict:
+    return {"idType": "ID_CUSIP", "idValue": cusip, "exchCode": "US"}
 
+
+def _retry_job(cusip: str) -> dict:
+    """Codes starting with a letter are CINS numbers (companies incorporated outside
+    the US, such as ASML or Spotify); OpenFIGI wants those as ID_CINS. No exchange
+    filter, so listings OpenFIGI files under another code are also returned."""
+    id_type = "ID_CINS" if cusip[:1].isalpha() else "ID_CUSIP"
+    return {"idType": id_type, "idValue": cusip}
+
+
+def _figi_pass(con, s, todo, make_job, parse, key, headers, log, sleep, label) -> int:
+    size, pause = (100, 0.25) if key else (10, 2.6)
     found = 0
     n_batches = (len(todo) + size - 1) // size
-    log(f"Mapping {len(todo):,} CUSIPs in {n_batches:,} requests"
+    log(f"{label}: {len(todo):,} CUSIPs in {n_batches:,} requests"
         + ("" if key else f" (no {OPENFIGI_KEY_ENV} set: about {n_batches * pause / 60:.0f} minutes)"))
     for b, i in enumerate(range(0, len(todo), size), start=1):
         chunk = todo[i:i + size]
-        jobs = [{"idType": "ID_CUSIP", "idValue": c, "exchCode": "US"} for c in chunk]
+        jobs = [make_job(c) for c in chunk]
         for attempt in range(6):
             r = s.post(OPENFIGI_URL, json=jobs, headers=headers, timeout=60)
             if r.status_code == 429:
@@ -163,7 +167,7 @@ def map_cusips(
             break
         else:
             raise RuntimeError("OpenFIGI kept refusing requests (HTTP 429). Try again later or set an API key.")
-        rows = [_parse_figi(c, res) for c, res in zip(chunk, r.json())]
+        rows = [parse(c, res) for c, res in zip(chunk, r.json())]
         found += sum(1 for row in rows if row[-1] == "ok")
         _insert_rows(con, "cusip_map",
                      ["cusip", "ticker", "symbol", "figi", "security_type", "name", "status"], rows)
@@ -171,7 +175,45 @@ def map_cusips(
             log(f"  {b:,}/{n_batches:,} requests, {found:,} tickers found")
         if b < n_batches:
             sleep(pause)
-    return {"requested": len(todo), "found": found}
+    return found
+
+
+def map_cusips(
+    con: duckdb.DuckDBPyConnection,
+    session=None,
+    api_key: str | None = None,
+    log: Log = print,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict[str, int]:
+    """Map unmapped CUSIPs, then retry the ones OpenFIGI did not find (once each).
+
+    Without an API key OpenFIGI allows about 25 requests a minute of 10 CUSIPs each;
+    a free key raises that to 100 CUSIPs per request."""
+    todo = cusips_to_map(con)
+    retry = [r[0] for r in con.execute(
+        "SELECT cusip FROM cusip_map WHERE status = 'not_found' ORDER BY cusip"
+    ).fetchall()]
+    if not todo and not retry:
+        return {"requested": 0, "found": 0, "retried": 0, "found_on_retry": 0}
+    s = _session(session)
+    key = api_key or os.environ.get(OPENFIGI_KEY_ENV)
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["X-OPENFIGI-APIKEY"] = key
+    args = (key, headers, log, sleep)
+
+    found = _figi_pass(con, s, todo, _first_pass_job, _parse_figi, *args, "Mapping") if todo else 0
+    # Retry everything still not found, including what this run just missed.
+    retry = [r[0] for r in con.execute(
+        "SELECT cusip FROM cusip_map WHERE status = 'not_found' ORDER BY cusip"
+    ).fetchall()]
+    found_retry = 0
+    if retry:
+        def parse_retry(c, res):
+            return _parse_figi(c, res, us_only=True, miss="not_found_retried")
+        found_retry = _figi_pass(con, s, retry, _retry_job, parse_retry, *args,
+                                 "Retrying unmatched (CINS ids, all exchanges)")
+    return {"requested": len(todo), "found": found, "retried": len(retry), "found_on_retry": found_retry}
 
 
 # ------------------------------------------------------------------ 2. prices

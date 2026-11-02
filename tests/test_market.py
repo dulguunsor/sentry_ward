@@ -9,7 +9,8 @@ Scenario for the 2026-06-30 quarter of the sample data:
                                days to exit 11 / (20% x 1,000) = 0.055
   BBB  OpenFIGI -> "BBB/A" (Yahoo symbol BBB-A). Yahoo close 500, but 13F filers
        reported about $100 -> price does not match (ticker reuse) -> not used.
-  CCC  OpenFIGI finds nothing.
+  CCC  OpenFIGI finds nothing at first; the retry (no exchange filter) returns London,
+       NYSE and composite US listings, and the composite US ticker is picked.
   DDD  OpenFIGI -> "DDD", Yahoo has no data (delisted).
 """
 
@@ -45,14 +46,23 @@ class FakeFigi:
         CUSIP["DDD"]: {"data": [{"ticker": "DDD", "figi": "BBG0000DDD", "securityType": "Common Stock", "name": "DDD CORP"}]},
     }
 
+    retry_answers = {
+        CUSIP["CCC"]: {"data": [
+            {"ticker": "CCCL", "exchCode": "LN", "securityType": "Common Stock"},
+            {"ticker": "CCCN", "exchCode": "UN", "securityType": "Common Stock"},
+            {"ticker": "CCC", "exchCode": "US", "securityType": "Common Stock", "figi": "BBG0000CCC"},
+        ]},
+    }
+
     def __init__(self):
         self.calls = []
 
     def post(self, url, json, headers, timeout):
-        self.calls.append([j["idValue"] for j in json])
+        self.calls.append([(j["idType"], j["idValue"], j.get("exchCode")) for j in json])
         if len(self.calls) == 1:
             return FakeResponse(None, status=429)  # first try is rate limited
-        return FakeResponse([self.answers.get(j["idValue"], {"warning": "x"}) for j in json])
+        table = self.answers if all(j.get("exchCode") == "US" for j in json) else self.retry_answers
+        return FakeResponse([table.get(j["idValue"], {"warning": "x"}) for j in json])
 
 
 class FakeSec:
@@ -114,16 +124,19 @@ def test_yahoo_symbol():
 
 def test_mapping_retries_and_caches(con):
     figi, out = run_market(con)
-    assert len(figi.calls) == 2                       # one 429, then success
-    assert out["figi"] == {"requested": 4, "found": 3}
+    assert len(figi.calls) == 3                       # one 429, first pass, retry pass
+    assert figi.calls[2] == [("ID_CUSIP", CUSIP["CCC"], None)]   # retry has no exchange filter
+    assert out["figi"] == {"requested": 4, "found": 3, "retried": 1, "found_on_retry": 1}
     rows = dict(con.execute("SELECT cusip, symbol FROM cusip_map").fetchall())
-    assert rows[CUSIP["BBB"]] == "BBB-A" and rows[CUSIP["CCC"]] is None
+    assert rows[CUSIP["BBB"]] == "BBB-A"
+    assert rows[CUSIP["CCC"]] == "CCC"                # composite US listing, not London or NYSE code
     # Second run has nothing left to map or download.
-    assert market.map_cusips(con, session=FakeFigi(), log=lambda m: None) == {"requested": 0, "found": 0}
-    # DDD returned nothing, so later runs retry it until MAX_PRICE_ATTEMPTS.
+    assert market.map_cusips(con, session=FakeFigi(), log=lambda m: None) == {
+        "requested": 0, "found": 0, "retried": 0, "found_on_retry": 0}
+    # CCC and DDD returned no prices, so later runs retry them until MAX_PRICE_ATTEMPTS.
     quiet = dict(log=lambda m: None, sleep=lambda s: None)
-    assert market.fetch_prices(con, downloader=fake_yahoo, **quiet)["requested"] == 1
-    assert market.fetch_prices(con, downloader=fake_yahoo, **quiet)["requested"] == 1
+    assert market.fetch_prices(con, downloader=fake_yahoo, **quiet)["requested"] == 2
+    assert market.fetch_prices(con, downloader=fake_yahoo, **quiet)["requested"] == 2
     assert market.fetch_prices(con, downloader=fake_yahoo, **quiet)["requested"] == 0
 
 
@@ -146,7 +159,7 @@ def test_price_check_rejects_reused_tickers(con):
     ).fetchall())
     assert got[CUSIP["AAA"]] is True
     assert got[CUSIP["BBB"]] is False        # Yahoo 500 vs 13F ~100
-    assert CUSIP["CCC"] not in got           # no ticker
+    assert got[CUSIP["CCC"]] is False        # ticker found on retry, but no prices
     assert got[CUSIP["DDD"]] is False        # no prices
 
 
@@ -222,3 +235,18 @@ def test_rate_limited_batch_is_retried(con):
     out = market.fetch_prices(con, downloader=flaky, log=lambda m: None, sleep=waits.append)
     assert len(calls) == 2 and 60 in waits
     assert out["with_data"] == 2          # AAA and BBB-A; DDD has no data
+
+
+def test_retry_job_uses_cins_for_letter_codes():
+    assert market._retry_job("G7997R103") == {"idType": "ID_CINS", "idValue": "G7997R103"}
+    assert market._retry_job("N07059210") == {"idType": "ID_CINS", "idValue": "N07059210"}
+    assert market._retry_job("934423104") == {"idType": "ID_CUSIP", "idValue": "934423104"}
+
+
+def test_retry_parse_keeps_only_us_listings():
+    foreign_only = {"data": [{"ticker": "ASML", "exchCode": "NA", "securityType": "Common Stock"}]}
+    row = market._parse_figi("N07059210", foreign_only, us_only=True, miss="not_found_retried")
+    assert row[1] is None and row[-1] == "not_found_retried"   # never retried again
+    adr = {"data": [{"ticker": "ASML", "exchCode": "UW", "securityType": "NY Reg Shrs",
+                     "securityType2": "Depositary Receipt"}]}
+    assert market._parse_figi("N07059210", adr, us_only=True)[1:3] == ("ASML", "ASML")

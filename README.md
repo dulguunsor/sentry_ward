@@ -103,7 +103,7 @@ $env:OPENFIGI_API_KEY = "your-key"   # optional, makes ward market much faster
 
 | Data | Source | Notes |
 |---|---|---|
-| CUSIP to ticker | [OpenFIGI](https://www.openfigi.com/api) | Free. Without a key about 25 requests a minute of 10 CUSIPs; a free key (set `OPENFIGI_API_KEY`) allows 100 CUSIPs per request. |
+| CUSIP to ticker | [OpenFIGI](https://www.openfigi.com/api) | Free. Codes that are not found are retried once: codes starting with a letter (CINS, for companies incorporated outside the US) as `ID_CINS`, and without an exchange filter, keeping US listings. Without a key about 25 requests a minute of 10 CUSIPs; a free key (set `OPENFIGI_API_KEY`) allows 100 CUSIPs per request. |
 | Daily prices, volume, splits | Yahoo Finance via `yfinance` | Unofficial. Delisted stocks usually have no data. |
 | Shares outstanding | SEC XBRL frames | One request per quarter covers every US filer. Foreign companies (ADRs) are usually missing. |
 
