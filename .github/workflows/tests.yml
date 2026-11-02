@@ -21,3 +21,31 @@ jobs:
       # Fail on any text file opened without an explicit encoding. Windows defaults
       # to cp1252, so a missing encoding only breaks there unless checked everywhere.
       - run: python -X warn_default_encoding -W error::EncodingWarning -m pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/live
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/live/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      # The built files are committed so pip users do not need Node. Fail if they are out of date.
+      - name: Check the committed build matches the source
+        run: git status --porcelain -- ../../src/sentryward/web/live && test -z "$(git status --porcelain -- ../../src/sentryward/web/live)"
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t sentry-ward .
+      - run: docker run --rm sentry-ward --help
+      - name: Check the image serves the live screen files
+        run: docker run --rm --entrypoint python sentry-ward -c "from sentryward.server import static_dir; assert (static_dir() / 'index.html').is_file()"
