@@ -8,3 +8,4 @@ data/out/
 data/*.duckdb
 data/*.duckdb.wal
 *.part
+data/*.duckdb.tmp/
