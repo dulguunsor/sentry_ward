@@ -79,6 +79,42 @@ def cmd_market(args, paths):
     print("Crowding scores updated with ownership and days to exit. Next: ward report")
 
 
+def cmd_live(args, paths):
+    import webbrowser
+
+    from . import live, server
+
+    con = _connect(paths)
+    for t in ("stock_crowding", "market", "prices"):
+        if not metrics._has_table(con, t):
+            raise SystemExit("Run `ward build` and `ward market` first.")
+    if not stress.ensure_benchmark(con):
+        raise SystemExit(f"Could not download {stress.BENCHMARK} prices, which are needed for beta.")
+    try:
+        baskets = live.build_baskets(con, top=args.top)
+    except RuntimeError as e:
+        raise SystemExit(f"Error: {e}")
+    hist = live.history(con, baskets)
+    html = dashboard.render(dashboard.gather(con, paths.out))
+    con.close()  # release the database so other commands can run while live mode is on
+
+    interval = max(60, args.interval)
+    monitor = live.LiveMonitor(baskets, hist, interval=interval)
+    monitor.start()
+    app = server.create_app(monitor, live.meta(baskets, hist), html)
+    url = f"http://{'localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host}:{args.port}/"
+    sig = hist["sigma"]
+    print(f"Live mode: {len(baskets['crowded'])} crowded stocks vs {len(baskets['peers'])} matched peers "
+          f"(holdings {baskets['period']}).")
+    print(f"Normal daily spread: {100 * sig:.2f}% (std over {hist['days']} days); alert at z <= {live.ALERT_Z}."
+          if sig else "Not enough price history to size alerts.")
+    print(f"Quotes every {interval} s from Yahoo Finance (delayed about 15 minutes).")
+    print(f"Open {url}   ·   full dashboard at {url}dashboard   ·   Ctrl+C to stop")
+    if not args.no_browser:
+        webbrowser.open(url)
+    app.run(host=args.host, port=args.port, threaded=True, use_reloader=False)
+
+
 def cmd_dashboard(args, paths):
     con = _connect(paths)
     try:
@@ -269,6 +305,14 @@ def main(argv=None):
 
     s = sub.add_parser("sample", help="write small sample data to try the pipeline offline")
     s.set_defaults(fn=cmd_sample)
+
+    lv = sub.add_parser("live", help="serve a live view of crowded stocks vs matched peers")
+    lv.add_argument("--port", type=int, default=8765)
+    lv.add_argument("--host", default="127.0.0.1", help="use 0.0.0.0 inside Docker")
+    lv.add_argument("--interval", type=int, default=120, help="seconds between quote updates (min 60)")
+    lv.add_argument("--top", type=int, default=30, help="size of the crowded basket")
+    lv.add_argument("--no-browser", action="store_true", help="do not open a browser window")
+    lv.set_defaults(fn=cmd_live)
 
     db = sub.add_parser("dashboard", help="write a self-contained HTML dashboard")
     db.set_defaults(fn=cmd_dashboard)

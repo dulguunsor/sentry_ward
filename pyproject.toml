@@ -13,6 +13,7 @@ dependencies = [
     "pandas>=2.0",
     "requests>=2.31",
     "yfinance>=0.2.50",
+    "flask>=3.0",
 ]
 
 [project.optional-dependencies]
