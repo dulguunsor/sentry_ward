@@ -6,6 +6,8 @@
 ![DuckDB](https://img.shields.io/badge/DuckDB-SQL-d97706)
 ![Data](https://img.shields.io/badge/data-SEC%20Form%2013F-0891b2)
 ![Stress test](https://img.shields.io/badge/stress%20test-pre--registered-16a34a)
+![React](https://img.shields.io/badge/live%20view-React%20%2B%20Flask-61dafb)
+![Docker](https://img.shields.io/badge/Docker-ready-2496ed)
 
 ![Sentry Ward dashboard](docs/dashboard.png)
 
@@ -57,6 +59,8 @@ ward sample && ward load && ward build && ward report
 | `ward report` | Prints the latest quarter; writes CSV and JSON | seconds |
 | `ward stress` / `ward stress --public` | Runs the pre-registered stress test | a few min |
 | `ward dashboard` | Writes one self-contained HTML dashboard | seconds |
+| `ward live` | Serves the live view of crowded stocks vs matched peers | runs until stopped |
+| `scripts/run_all.sh` | Runs every step above from `download` to `dashboard` | sum of the above |
 
 ## What's in it
 
@@ -84,6 +88,65 @@ ward sample && ward load && ward build && ward report
 | UNWIND | Estimated price moves if crowded funds sell 10-50% over 1-10 days |
 | FUNDS | Funds from most index-like to least; ETFs held most widely |
 | ABOUT | Sources, blind spots and method |
+
+## Live view (`ward live`)
+
+`ward live` starts a small local server and opens the live screen in a browser. It
+needs the database built by the steps above, including `ward market`.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--port` | 8765 | Port to serve on |
+| `--host` | 127.0.0.1 | Use `0.0.0.0` inside Docker |
+| `--interval` | 120 | Seconds between quote updates (at least 60) |
+| `--top` | 30 | Size of the crowded basket |
+| `--no-browser` | off | Do not open a browser window |
+
+How it works:
+
+- The **crowded basket** is the top 30 stocks by crowding score in the latest quarter.
+  Each one gets two **matched peers** from the same size quintile and beta tercile,
+  closest in market value, the same matching the stress test uses.
+- Every two minutes the server fetches 5-minute bars from Yahoo Finance (delayed about
+  15 minutes) and computes today's return for both baskets since yesterday's close.
+- The **spread** is crowded minus peers. The z-score divides it by the standard
+  deviation of the daily spread over the last 250 sessions. The screen shows an
+  **unwind warning** at z = -2 or lower.
+- The stress test did not find that crowded stocks fall harder in most sell-offs, so a
+  warning is a reason to look closer, not a forecast.
+
+| Part | Built with | Where |
+|---|---|---|
+| Baskets, history, snapshot | Python, DuckDB | `src/sentryward/live.py` |
+| API (`/api/live`, `/api/meta`) | Flask | `src/sentryward/server.py` |
+| Live screen | React, Vite | `web/live` (source), `src/sentryward/web/live` (built) |
+| Static dashboard script | JavaScript | `src/sentryward/web/dashboard.js` |
+
+The built front end is committed, so `pip install` is enough to run `ward live`. To
+change the screen you need Node 20 or later:
+
+```bash
+cd web/live
+npm install
+npm run dev     # hot reload on port 5173, proxies the API to ward live on 8765
+npm test        # unit tests for formatting, scales and alert levels
+npm run build   # writes the built files into src/sentryward/web/live
+```
+
+## Docker
+
+The image installs the package and keeps all data in the `/data` volume.
+
+```bash
+docker build -t sentry-ward .
+docker run --rm -v ward-data:/data -e SEC_USER_AGENT="Your Name you@example.com" sentry-ward download
+docker run --rm -v ward-data:/data sentry-ward load
+docker run --rm -v ward-data:/data sentry-ward build
+docker run --rm -v ward-data:/data -e SEC_USER_AGENT="Your Name you@example.com" sentry-ward market
+docker run --rm -p 8765:8765 -v ward-data:/data sentry-ward live --host 0.0.0.0 --no-browser
+```
+
+Then open http://localhost:8765. In PowerShell, use the same commands on one line each.
 
 ## Pipeline
 
@@ -211,8 +274,13 @@ over time and some firms file under several entities.
 ## Tests
 
 ```bash
-pytest
+pytest                       # Python: pipeline, metrics, stress test, live mode, API
+cd web/live && npm test      # JavaScript: live screen helpers
 ```
+
+GitHub Actions runs the Python tests on Windows, macOS and Linux (Python 3.11 and
+3.13) with strict text encoding checks, runs the JavaScript tests and checks the
+committed front-end build is current, and builds the Docker image.
 
 The tests use synthetic filings small enough to check by hand. For example, three
 sample funds have overlaps of 0.80, 0.25 and 0.25, so the crowding index must be
@@ -226,6 +294,8 @@ sample funds have overlaps of 0.80, 0.25 and 0.25, so the crowding index must be
 - [x] Stress tests: do crowded stocks fall harder in sell-offs? (pre-registered)
 - [x] Unwind simulator (square-root impact model, in the dashboard)
 - [x] Dashboard (`ward dashboard`)
+- [x] Live view with delayed quotes (`ward live`)
+- [x] Docker image and pipeline script
 
 ## Contributing
 
