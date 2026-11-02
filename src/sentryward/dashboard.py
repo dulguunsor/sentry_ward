@@ -138,8 +138,15 @@ def render(data: dict) -> str:
     )
 
 
-def write(con: duckdb.DuckDBPyConnection, out_dir: Path) -> Path:
+def write(con: duckdb.DuckDBPyConnection, out_dir: Path, site: Path | None = None) -> Path:
+    """Write the dashboard to out_dir. With `site`, write it as site/index.html instead, ready
+    for GitHub Pages (a `.nojekyll` file stops Pages from running Jekyll over the folder)."""
     data = gather(con, out_dir)
-    path = out_dir / f"sentry-ward-{data['period']}.html"
+    if site is not None:
+        site.mkdir(parents=True, exist_ok=True)
+        (site / ".nojekyll").write_text("", encoding="utf-8")
+        path = site / "index.html"
+    else:
+        path = out_dir / f"sentry-ward-{data['period']}.html"
     path.write_text(render(data), encoding="utf-8")
     return path

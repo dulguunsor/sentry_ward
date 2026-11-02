@@ -50,6 +50,10 @@ def test_dashboard_file(raw_dir, universe_csv, monkeypatch, tmp_path):
     assert data["stress"]["primary"]["h1"]["summary"]["avg_diff"] == -0.01
     assert "public" not in data["stress"]
     assert data["coverage"]["value_priced_share"] > 0
+    # The same dashboard as a website folder for GitHub Pages.
+    site = dashboard.write(con, tmp_path, site=tmp_path / "docs")
+    assert site == tmp_path / "docs" / "index.html" and (tmp_path / "docs" / ".nojekyll").exists()
+    assert embedded(site.read_text(encoding="utf-8"))["period"] == "2026-06-30"
 
 
 def test_dashboard_without_market_or_stress(raw_dir, universe_csv, monkeypatch, tmp_path):

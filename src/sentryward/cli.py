@@ -122,11 +122,14 @@ def cmd_live(args, paths):
 def cmd_dashboard(args, paths):
     con = _connect(paths)
     try:
-        path = dashboard.write(con, paths.out)
+        path = dashboard.write(con, paths.out, Path(args.site) if args.site else None)
     except RuntimeError as e:
         raise SystemExit(f"Error: {e}")
     print(f"Wrote {path.resolve()}")
-    print("Open it in a browser. It is one self-contained file you can share.")
+    if args.site:
+        print("Commit and push it; GitHub Pages serves it once Pages is set to this folder.")
+    else:
+        print("Open it in a browser. It is one self-contained file you can share.")
 
 
 def _pct(x):
@@ -319,6 +322,8 @@ def main(argv=None):
     lv.set_defaults(fn=cmd_live)
 
     db = sub.add_parser("dashboard", help="write a self-contained HTML dashboard")
+    db.add_argument("--site", metavar="DIR",
+                    help="write DIR/index.html for a website instead, e.g. --site docs for GitHub Pages")
     db.set_defaults(fn=cmd_dashboard)
 
     st = sub.add_parser("stress", help="run the pre-registered stress test (see PREREGISTRATION.md)")

@@ -12,6 +12,8 @@
 
 ![Sentry Ward dashboard](docs/dashboard.png)
 
+**[Open the dashboard](https://dulguuntsatsralt-cell.github.io/Sentry-Ward/)**: the latest quarter, published with GitHub Pages.
+
 ## About
 
 Multi-manager funds run many teams that are supposed to be independent. When those
@@ -60,6 +62,7 @@ ward sample && ward load && ward build && ward report
 | `ward report` | Prints the latest quarter; writes CSV and JSON | seconds |
 | `ward stress` / `ward stress --public` | Runs the pre-registered stress test | a few min |
 | `ward dashboard` | Writes one self-contained HTML dashboard | seconds |
+| `ward dashboard --site docs` | Writes it as `docs/index.html` for GitHub Pages | seconds |
 | `ward live` | Serves the live view of crowded stocks vs matched peers | runs until stopped |
 | `scripts/run_all.sh` | Runs every step above from `download` to `dashboard` | sum of the above |
 
