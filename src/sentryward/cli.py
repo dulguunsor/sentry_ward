@@ -146,7 +146,7 @@ def cmd_stress(args, paths):
               f"range {_pct(d.min())} to {_pct(d.max())}.")
         oq.to_csv(out / f"stress_ordinary_quarters{suffix}.csv", index=False)
         payload["ordinary_quarters"] = _records(oq.astype({"from": str, "to": str}))
-    with open(out / f"stress{suffix}.json", "w") as fh:
+    with open(out / f"stress{suffix}.json", "w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2, allow_nan=False, default=float)
     print(f"\nWrote CSV and JSON to {out}")
     print("Unmatched = plain crowded minus everything else. Regression = crowded effect after beta,"
@@ -238,7 +238,7 @@ def cmd_report(args, paths):
     pairs.to_csv(out / f"top_pairs_{period}.csv", index=False)
     funds.to_csv(out / f"funds_{period}.csv", index=False)
     etfs.to_csv(out / f"etfs_{period}.csv", index=False)
-    with open(out / f"dashboard_{period}.json", "w") as fh:
+    with open(out / f"dashboard_{period}.json", "w", encoding="utf-8") as fh:
         json.dump(
             {
                 "period": period,

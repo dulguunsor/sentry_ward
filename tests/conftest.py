@@ -22,6 +22,7 @@ def universe_csv(tmp_path: Path) -> Path:
         "Citadel,CITADEL ADVISORS%,multi-manager\n"
         "Millennium,MILLENNIUM MANAGEMENT%,multi-manager\n"
         "Point72,POINT72 ASSET MANAGEMENT%,multi-manager\n"
-        "Ghost Fund,NO SUCH FILER%,other\n"
+        "Ghost Fund,NO SUCH FILER%,other\n",
+        encoding="utf-8",
     )
     return p

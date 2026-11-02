@@ -308,7 +308,7 @@ def test_cli_end_to_end(raw_dir, universe_csv, tmp_path, monkeypatch, capsys):
     assert "Ghost Fund" in out
     import json
 
-    dash = json.loads((data / "out" / "dashboard_2026-06-30.json").read_text())  # strict JSON
+    dash = json.loads((data / "out" / "dashboard_2026-06-30.json").read_text(encoding="utf-8"))  # strict JSON
     assert dash["top_pairs"][0]["active_overlap"] == pytest.approx(0.5)
     assert dash["crowding_index"][0]["active_index"] is None  # 2022 has no active bets
     assert (data / "out" / "overlap_matrix_2026-06-30.csv").exists()

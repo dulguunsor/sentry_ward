@@ -101,7 +101,7 @@ def gather(con: duckdb.DuckDBPyConnection, out_dir: Path) -> dict:
     for key, name in (("primary", "stress.json"), ("public", "stress_public.json")):
         f = out_dir / name
         if f.exists():
-            stress_results[key] = json.loads(f.read_text())
+            stress_results[key] = json.loads(f.read_text(encoding="utf-8"))
 
     return {
         "generated": datetime.now().strftime("%Y-%m-%d %H:%M"),

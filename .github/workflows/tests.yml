@@ -18,4 +18,6 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: pip install -e ".[dev]"
-      - run: pytest -q
+      # Fail on any text file opened without an explicit encoding. Windows defaults
+      # to cp1252, so a missing encoding only breaks there unless checked everywhere.
+      - run: python -X warn_default_encoding -W error::EncodingWarning -m pytest -q

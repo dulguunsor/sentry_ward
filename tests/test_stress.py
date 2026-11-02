@@ -149,5 +149,5 @@ def test_cli_stress(tmp_path, monkeypatch, capsys):
     cli.main(["stress", "--reps", "100"])
     out = capsys.readouterr().out
     assert "Test sell-off" in out and "Average over 1 events" in out
-    data = json.loads((tmp_path / "out" / "stress.json").read_text())
+    data = json.loads((tmp_path / "out" / "stress.json").read_text(encoding="utf-8"))
     assert data["h1"]["summary"]["avg_diff"] == pytest.approx(-0.05, abs=0.012)

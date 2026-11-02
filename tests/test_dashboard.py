@@ -38,10 +38,10 @@ def test_dashboard_file(raw_dir, universe_csv, monkeypatch, tmp_path):
                                       "events_negative": 1},
                           "per_event": [{"event": "X", "formation": "2025-12-31", "diff": -0.01,
                                          "ci_low": -0.02, "ci_high": 0.001}]}}
-    (tmp_path / "stress.json").write_text(json.dumps(stress_json))
+    (tmp_path / "stress.json").write_text(json.dumps(stress_json), encoding="utf-8")
     path = dashboard.write(con, tmp_path)
     assert path.name == "sentry-ward-2026-06-30.html"
-    html = path.read_text()
+    html = path.read_text(encoding="utf-8")
     assert "/*__DATA__*/" not in html
     data = embedded(html)
     assert data["period"] == "2026-06-30"
@@ -54,7 +54,7 @@ def test_dashboard_file(raw_dir, universe_csv, monkeypatch, tmp_path):
 
 def test_dashboard_without_market_or_stress(raw_dir, universe_csv, monkeypatch, tmp_path):
     con = build(raw_dir, universe_csv, monkeypatch, with_market=False)
-    data = embedded(dashboard.write(con, tmp_path).read_text())
+    data = embedded(dashboard.write(con, tmp_path).read_text(encoding="utf-8"))
     assert data["coverage"] is None and data["stress"] == {}
     assert data["stocks"][0]["own"] is None
 
