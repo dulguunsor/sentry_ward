@@ -142,13 +142,26 @@ def test_overlap_by_hand(built):
     assert idx == pytest.approx(1.30 / 3)
 
 
-def test_pairs_with_nothing_shared_count_as_zero(built):
+def test_share_classes_merge_but_etf_trusts_do_not(built):
     con, _ = built
-    # In 2022 only Citadel and Millennium filed, both holding only AAA -> overlap 1.
+    # Q3 2022: Citadel AAA $5k + AAA class B $5k + ETF2 $1k; Millennium AAA $7k + ETF1 $1k.
+    # Correct: AAA weights 10/11 and 7/8, ETFs differ  -> overlap 0.875
+    # Classes not merged                               -> 0.4545
+    # ETFs wrongly merged                              -> 0.966
     row = con.execute(
         "SELECT overlap FROM fund_overlap WHERE period = DATE '2022-09-30'"
     ).fetchall()[0]
-    assert row[0] == pytest.approx(1.0)
+    assert row[0] == pytest.approx(0.875)
+
+
+def test_issuer_key(con):
+    metrics.create_issuer_key(con)
+    q = "SELECT issuer_key(?, ?)"
+    assert con.execute(q, ["02079K305", "ALPHABET INC"]).fetchall()[0][0] == "02079K"
+    assert con.execute(q, ["02079K107", "ALPHABET INC"]).fetchall()[0][0] == "02079K"
+    assert con.execute(q, ["464287655", "ISHARES TR"]).fetchall()[0][0] == "464287655"
+    assert con.execute(q, ["81369Y803", "SELECT SECTOR SPDR TR"]).fetchall()[0][0] == "81369Y803"
+    assert con.execute(q, ["78462F103", "SPDR S&P 500 ETF TR"]).fetchall()[0][0] == "78462F103"
 
 
 def test_stock_crowding(built):
@@ -163,7 +176,20 @@ def test_stock_crowding(built):
     assert aaa[1:4] == (3, 3, pytest.approx(1.0))
     assert aaa[4] == pytest.approx(0.50 + 0.40 + 0.25)
     assert aaa[5] == pytest.approx(100.0)
-    assert rows[1][5] == pytest.approx(0.0)
+    # BBB: holders 2/3 of the top stock's, weight 0.90/1.15 of the top stock's
+    assert rows[1][5] == pytest.approx(100 * (2 / 3 + 0.90 / 1.15) / 2)
+
+
+def test_rank_and_report_helpers(built):
+    con, _ = built
+    ranks = con.execute(
+        "SELECT crowding_rank FROM stock_crowding WHERE period = DATE '2026-06-30' ORDER BY crowding_rank"
+    ).fetchall()
+    assert [r[0] for r in ranks] == [1, 2]
+    assert metrics.missing_funds(con, "2022-09-30") == ["Point72"]
+    assert metrics.missing_funds(con, "2026-06-30") == []
+    pairs = metrics.top_pairs(con, "2026-06-30")
+    assert list(pairs.iloc[0][["fund_a", "fund_b"]]) == ["Citadel", "Millennium"]
 
 
 def test_score_change_only_vs_previous_quarter(built):

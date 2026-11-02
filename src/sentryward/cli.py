@@ -55,19 +55,26 @@ def cmd_report(args, paths):
     period = args.period or con.execute("SELECT max(period)::VARCHAR FROM crowding_index").fetchall()[0][0]
     top = con.execute(
         """
-        SELECT cusip, issuer, n_holders, n_funds, round(holder_share, 3) AS holder_share,
-               round(sum_weight, 4) AS sum_weight, round(total_value_usd / 1e9, 2) AS value_bn,
+        SELECT crowding_rank AS rank, cusip, left(issuer, 28) AS issuer,
+               n_holders AS holders, round(holder_share, 3) AS holder_share,
+               round(sum_weight, 3) AS sum_weight, round(total_value_usd / 1e9, 2) AS value_bn,
                round(crowding_score, 1) AS score, round(score_change, 1) AS change
         FROM stock_crowding WHERE period = ?::DATE
-        ORDER BY crowding_score DESC LIMIT ?
+        ORDER BY crowding_rank LIMIT ?
         """,
         [period, args.top],
     ).df()
     idx = con.execute("SELECT * FROM crowding_index ORDER BY period").df()
     matrix = metrics.overlap_matrix(con, period)
+    pairs = metrics.top_pairs(con, period)
+    missing = metrics.missing_funds(con, period)
 
-    print(f"\nQuarter ending {period}")
+    print(f"\nQuarter ending {period}: {len(matrix)} funds reporting")
+    if missing:
+        print(f"No 13F holdings report this quarter: {', '.join(missing)}")
     print(top.to_string(index=False))
+    print("\nMost similar fund pairs (share of portfolio in common):")
+    print(pairs.to_string(index=False))
     print("\nCrowding index by quarter (average pairwise overlap):")
     print(idx.tail(8).to_string(index=False))
 
@@ -75,11 +82,14 @@ def cmd_report(args, paths):
     top.to_csv(out / f"top_crowded_{period}.csv", index=False)
     idx.to_csv(out / "crowding_index.csv", index=False)
     matrix.to_csv(out / f"overlap_matrix_{period}.csv")
+    pairs.to_csv(out / f"top_pairs_{period}.csv", index=False)
     with open(out / f"dashboard_{period}.json", "w") as fh:
         json.dump(
             {
                 "period": period,
+                "missing_funds": missing,
                 "top_crowded": top.to_dict(orient="records"),
+                "top_pairs": pairs.to_dict(orient="records"),
                 "crowding_index": idx.assign(period=idx.period.astype(str)).to_dict(orient="records"),
                 "overlap_matrix": {"funds": list(matrix.index), "values": matrix.round(4).values.tolist()},
             },

@@ -72,7 +72,11 @@ $env:SEC_USER_AGENT = "Your Name your.email@example.com"
 4. **Long stock positions only.** Options (PUT/CALL) and principal amounts (bonds)
    are dropped.
 5. **Split rows are summed.** One filing can list the same stock several times.
-6. **One fund, many filers.** Filers matching the same name in `universe.csv` are
+6. **One company, one position.** Share classes of the same company (Alphabet class A
+   and C) are combined using the first 6 characters of the CUSIP, which identify the
+   issuer. Fund trusts such as iShares or SPDR are not combined, because one trust
+   code covers many different ETFs.
+7. **One fund, many filers.** Filers matching the same name in `universe.csv` are
    combined, so a fund is never compared with itself.
 
 ## Metric definitions
@@ -82,8 +86,11 @@ $env:SEC_USER_AGENT = "Your Name your.email@example.com"
 - `sum_weight`: sum of all funds' weights in the stock
 - `hf_ownership`: shares held by the universe / shares outstanding (needs market data)
 - `days_to_exit`: shares held / (20% of average daily volume) (needs market data)
-- `crowding_score`: average percentile rank of the available components, 0 to 100,
-  among stocks held by at least 2 funds
+- `crowding_score`: 0 to 100, among stocks held by at least 2 funds. `holder_share`
+  and `sum_weight` are divided by the quarter's highest value, so the most crowded
+  stock scores near 100 and the rest spread out below it. `hf_ownership` and
+  `days_to_exit` use percentile ranks because they have extreme outliers.
+- `crowding_rank`: position in the quarter's list, 1 = most crowded
 - `overlap(A, B)`: sum over stocks of min(weight_A, weight_B)
 - `crowding_index`: average overlap across all fund pairs
 

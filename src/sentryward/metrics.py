@@ -8,8 +8,12 @@ sum_weight      sum of every universe fund's weight in the stock (how much of th
                 group's attention it takes, independent of fund size)
 hf_ownership    universe shares held / shares outstanding     (needs market data)
 days_to_exit    universe shares held / (20% of average daily volume)  (needs market data)
-crowding_score  0-100. Average percentile rank of the components above that are
-                available, among stocks held by at least ``min_holders`` funds.
+crowding_score  0-100. Average of the components that are available, among stocks
+                held by at least ``min_holders`` funds. holder_share and sum_weight
+                are divided by the quarter's highest value (so the top stock scores
+                near 100 and the rest spread out below it); hf_ownership and
+                days_to_exit use percentile ranks because they have extreme outliers.
+Stocks are grouped by company (first 6 CUSIP characters), so share classes count once.
 overlap(i, j)   sum over stocks of min(weight_i, weight_j): the share of each
                 portfolio the two funds have in common (0 = nothing, 1 = identical)
 crowding_index  average pairwise overlap across all funds in the universe that quarter
@@ -45,20 +49,46 @@ def unmatched_patterns(con: duckdb.DuckDBPyConnection, universe_csv: Path) -> li
     return sorted(labels - found)
 
 
+# Fund trusts (iShares, SPDR, Vanguard ...) put many different ETFs under one
+# issuer code, so those are never merged.
+FUND_TRUST_PATTERN = r"(\bTR\b|TRUST|\bETF|\bFD\b|\bFDS\b|FUND|PORTFOLIO|SELECT SECTOR|\bINDEX\b)"
+
+
+def create_issuer_key(con: duckdb.DuckDBPyConnection) -> None:
+    """issuer_key(cusip, issuer): one id per company, so share classes count once.
+
+    The first 6 characters of a CUSIP identify the issuer, so Alphabet class A
+    (02079K305) and class C (02079K107) both become 02079K. Fund trusts keep
+    their full CUSIP.
+    """
+    con.execute(
+        f"""
+        CREATE OR REPLACE MACRO issuer_key(cusip, issuer) AS
+            CASE WHEN regexp_matches(upper(coalesce(issuer, '')), '{FUND_TRUST_PATTERN}')
+                 THEN cusip ELSE left(cusip, 6) END
+        """
+    ).fetchall()
+
+
 def build_fund_weights(con: duckdb.DuckDBPyConnection) -> None:
     # Several CIKs can share one label (e.g. a parent and an adviser). They are
     # combined into one fund so the fund is never compared with itself.
+    # Positions are grouped per company (issuer_key), keeping the largest line's
+    # CUSIP and name as the label.
+    create_issuer_key(con)
     con.execute(
         """
         CREATE OR REPLACE TABLE fund_positions AS
         WITH pos AS (
-            SELECT u.fund, h.period, h.cusip,
-                   any_value(h.issuer) AS issuer,
-                   sum(h.value_usd)    AS value_usd,
-                   sum(h.shares)       AS shares
+            SELECT u.fund, h.period,
+                   issuer_key(h.cusip, h.issuer)  AS issuer_id,
+                   arg_max(h.cusip, h.value_usd)  AS cusip,
+                   arg_max(h.issuer, h.value_usd) AS issuer,
+                   sum(h.value_usd)               AS value_usd,
+                   sum(h.shares)                  AS shares
             FROM holdings h
             JOIN universe u USING (cik)
-            GROUP BY u.fund, h.period, h.cusip
+            GROUP BY ALL
         )
         SELECT *, value_usd / sum(value_usd) OVER (PARTITION BY fund, period) AS weight
         FROM pos
@@ -84,7 +114,7 @@ def build_stock_crowding(con: duckdb.DuckDBPyConnection, min_holders: int = 2) -
         else """, NULL::DOUBLE AS shares_outstanding, NULL::DOUBLE AS adv_shares,
            NULL::DOUBLE AS hf_ownership, NULL::DOUBLE AS days_to_exit"""
     )
-    market_join = "LEFT JOIN market m USING (cusip, period)" if market else ""
+    market_join = "LEFT JOIN market m ON m.cusip = s.cusip AND m.period = s.period" if market else ""
 
     con.execute(
         f"""
@@ -93,14 +123,15 @@ def build_stock_crowding(con: duckdb.DuckDBPyConnection, min_holders: int = 2) -
             SELECT period, count(DISTINCT fund) AS n_funds FROM fund_positions GROUP BY period
         ),
         s AS (
-            SELECT period, cusip,
-                   any_value(issuer)    AS issuer,
+            SELECT period, issuer_id,
+                   arg_max(cusip, value_usd)  AS cusip,
+                   arg_max(issuer, value_usd) AS issuer,
                    count(*)             AS n_holders,
                    sum(value_usd)       AS total_value_usd,
                    sum(shares)          AS total_shares,
                    sum(weight)          AS sum_weight
             FROM fund_positions
-            GROUP BY period, cusip
+            GROUP BY period, issuer_id
         ),
         base AS (
             SELECT s.*, n.n_funds, s.n_holders / n.n_funds AS holder_share {market_cols}
@@ -109,8 +140,10 @@ def build_stock_crowding(con: duckdb.DuckDBPyConnection, min_holders: int = 2) -
         ),
         ranked AS (
             SELECT *,
-                percent_rank() OVER (PARTITION BY period ORDER BY holder_share) AS r_holders,
-                percent_rank() OVER (PARTITION BY period ORDER BY sum_weight)   AS r_weight,
+                -- Scaled to the quarter's most crowded stock, so the score separates
+                -- the top of the list instead of bunching it near 100.
+                holder_share / max(holder_share) OVER (PARTITION BY period) AS r_holders,
+                sum_weight   / max(sum_weight)   OVER (PARTITION BY period) AS r_weight,
                 CASE WHEN hf_ownership IS NULL THEN NULL ELSE
                     percent_rank() OVER (PARTITION BY period, hf_ownership IS NULL ORDER BY hf_ownership) END AS r_own,
                 CASE WHEN days_to_exit IS NULL THEN NULL ELSE
@@ -124,13 +157,14 @@ def build_stock_crowding(con: duckdb.DuckDBPyConnection, min_holders: int = 2) -
             FROM ranked
         )
         SELECT * EXCLUDE (prev_period, prev_score),
+            rank() OVER (PARTITION BY period ORDER BY crowding_score DESC) AS crowding_rank,
             -- Only compare with the quarter immediately before; gaps give NULL.
             CASE WHEN prev_period = last_day(period - INTERVAL 3 MONTH)
                  THEN crowding_score - prev_score END AS score_change
         FROM (
             SELECT *,
-                lag(period)         OVER (PARTITION BY cusip ORDER BY period) AS prev_period,
-                lag(crowding_score) OVER (PARTITION BY cusip ORDER BY period) AS prev_score
+                lag(period)         OVER (PARTITION BY issuer_id ORDER BY period) AS prev_period,
+                lag(crowding_score) OVER (PARTITION BY issuer_id ORDER BY period) AS prev_score
             FROM scored
         )
         """
@@ -152,7 +186,7 @@ def build_overlap(con: duckdb.DuckDBPyConnection) -> None:
                    count(*)                       AS shared_stocks
             FROM fund_positions a
             JOIN fund_positions b
-              ON a.period = b.period AND a.cusip = b.cusip AND a.fund < b.fund
+              ON a.period = b.period AND a.issuer_id = b.issuer_id AND a.fund < b.fund
             GROUP BY ALL
         )
         SELECT p.period, p.fund_a, p.fund_b,
@@ -174,6 +208,30 @@ def build_overlap(con: duckdb.DuckDBPyConnection) -> None:
         ORDER BY period
         """
     ).fetchall()
+
+
+def missing_funds(con: duckdb.DuckDBPyConnection, period: str) -> list[str]:
+    """Universe funds with no holdings report for this quarter."""
+    rows = con.execute(
+        """
+        SELECT DISTINCT fund FROM universe
+        WHERE fund NOT IN (SELECT fund FROM fund_positions WHERE period = ?::DATE)
+        ORDER BY fund
+        """,
+        [period],
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def top_pairs(con: duckdb.DuckDBPyConnection, period: str, n: int = 10) -> pd.DataFrame:
+    return con.execute(
+        """
+        SELECT fund_a, fund_b, round(overlap, 3) AS overlap, shared_stocks
+        FROM fund_overlap WHERE period = ?::DATE
+        ORDER BY overlap DESC LIMIT ?
+        """,
+        [period, n],
+    ).df()
 
 
 def overlap_matrix(con: duckdb.DuckDBPyConnection, period: str) -> pd.DataFrame:

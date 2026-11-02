@@ -6,8 +6,9 @@ without downloading anything from SEC.
 Two files, in the two naming styles SEC has used:
 
 2022q4_form13f.zip  (quarter ending 30-SEP-2022, old style, VALUE in thousands)
-    Citadel  AAA 5 (= $5,000), filed 14-NOV-2022
-    Millennium AAA 7000 dollars, filed 03-JAN-2023 (first day of dollar units)
+    Citadel  AAA 5 (= $5,000), AAA class B 5 (= $5,000), iShares ETF2 1 (= $1,000), filed 14-NOV-2022
+    Millennium AAA $7,000 and iShares ETF1 $1,000, filed 03-JAN-2023 (first day of dollar units)
+    -> overlap 0.875: share classes merge, the two ETFs in one trust do not
 
 01jun2026-31aug2026_form13f.zip  (quarter ending 30-JUN-2026, adds a FIGI column)
     Citadel     AAA 500, BBB 300 + 200 (split rows), plus a PUT and a bond row to drop
@@ -43,7 +44,11 @@ INFO_COLS = [
     "SSHPRNAMT", "SSHPRNAMTTYPE", "PUTCALL", "INVESTMENTDISCRETION", "OTHERMANAGER",
 ]
 
-CUSIP = {"AAA": "000000AA1", "BBB": "000000BB2", "CCC": "000000CC3", "DDD": "000000DD4"}
+CUSIP = {
+    "AAA": "11111A101", "BBB": "22222B102", "CCC": "33333C103", "DDD": "44444D104",
+    "AAA_B": "11111A200",          # second share class of AAA: must merge with AAA
+    "ETF1": "464287655", "ETF2": "464287200",  # two ETFs in one trust: must stay apart
+}
 
 
 def _tsv(cols, rows):
@@ -53,8 +58,9 @@ def _tsv(cols, rows):
     return "\n".join(lines) + "\n"
 
 
-def _info(acc, sk, ticker, value, shares, kind="SH", putcall=None, figi=None):
-    row = [acc, sk, f'{ticker} "CORP"', "COM", CUSIP.get(ticker, "999999ZZ9"), value, shares, kind, putcall, "SOLE", None]
+def _info(acc, sk, ticker, value, shares, kind="SH", putcall=None, figi=None, name=None):
+    issuer = name or f'{ticker.split("_")[0]} "CORP"'
+    row = [acc, sk, issuer, "COM", CUSIP.get(ticker, "999999ZZ9"), value, shares, kind, putcall, "SOLE", None]
     return row + ([figi] if figi is not None else [])
 
 
@@ -87,7 +93,10 @@ def write_sample(raw: Path) -> Path:
         ],
         infos=[
             _info("0001-22-000001", 1, "AAA", 5, 50),        # thousands -> $5,000
+            _info("0001-22-000001", 2, "AAA_B", 5, 50),      # class B of the same company
             _info("0003-23-000001", 1, "AAA", 7000, 70),     # dollars
+            _info("0003-23-000001", 2, "ETF1", 1000, 10, name="ISHARES TR"),
+            _info("0001-22-000001", 3, "ETF2", 1, 10, name="ISHARES TR"),
         ],
     )
 
