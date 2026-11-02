@@ -122,10 +122,20 @@ def gather(con: duckdb.DuckDBPyConnection, out_dir: Path) -> dict:
     }
 
 
+def _asset(name: str) -> str:
+    return resources.files("sentryward").joinpath(name).read_text(encoding="utf-8")
+
+
 def render(data: dict) -> str:
-    template = resources.files("sentryward").joinpath("dashboard_template.html").read_text(encoding="utf-8")
+    """Fill the template with the styles, the data and the script, so the result is one
+    file with nothing to load."""
     payload = json.dumps(data, allow_nan=False, separators=(",", ":")).replace("</", "<\\/")
-    return template.replace("/*__DATA__*/null", payload)
+    return (
+        _asset("dashboard_template.html")
+        .replace("/*__CSS__*/", _asset("web/dashboard.css"))
+        .replace("/*__DATA__*/null", payload)
+        .replace("/*__SCRIPT__*/", _asset("web/dashboard.js"))
+    )
 
 
 def write(con: duckdb.DuckDBPyConnection, out_dir: Path) -> Path:

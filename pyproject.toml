@@ -25,7 +25,7 @@ ward = "sentryward.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-sentryward = ["*.html"]
+sentryward = ["*.html", "web/*.js", "web/*.css", "web/live/*", "web/live/assets/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
