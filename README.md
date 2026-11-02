@@ -85,10 +85,12 @@ $env:SEC_USER_AGENT = "Your Name your.email@example.com"
    and C) are combined using the first 6 characters of the CUSIP, which identify the
    issuer. Fund trusts such as iShares or SPDR are not combined, because one trust
    code covers many different ETFs.
-7. **Unit errors are dropped.** Some filers report values 1,000 times too big or
-   too small. A row is dropped when its price per share (value / shares) is more
-   than 10x away from the median every filer reported for that stock that quarter.
-   `ward build` prints how many rows this removed.
+7. **Unit errors are fixed, then stray rows dropped.** Some filers kept reporting in
+   thousands after the 2023 switch, or the reverse. For each row, the price per share
+   (value / shares) is compared with the median price all filers reported for that
+   stock. If a filing's typical ratio is about 1/1000 or 1000, the whole filing is
+   rescaled. Any row still more than 10x off is dropped. `ward build` prints both
+   counts and a per-fund check.
 8. **ETFs are separated.** Identified by sponsor names (iShares, SPDR, Invesco
    QQQ, ProShares and others) and words like ETF or INDEX in the title of class.
    Companies with "Trust" in their name, such as Northern Trust, are not flagged.

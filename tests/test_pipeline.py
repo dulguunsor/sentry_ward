@@ -306,3 +306,35 @@ def test_cli_end_to_end(raw_dir, universe_csv, tmp_path, monkeypatch, capsys):
     assert dash["top_pairs"][0]["active_overlap"] == pytest.approx(0.5)
     assert dash["crowding_index"][0]["active_index"] is None  # 2022 has no active bets
     assert (data / "out" / "overlap_matrix_2026-06-30.csv").exists()
+
+
+def test_unit_fix_rescales_whole_filings_and_drops_stray_rows():
+    c = duckdb.connect()
+    # Three filers report prices near $100. Filer 4 reported its whole filing in
+    # thousands after the switch (prices look 1000x too small). Filer 5 has one
+    # stray row that is 50x off. Filer 6 holds only one comparable stock.
+    rows = []
+    for cik in ("1", "2", "3"):
+        for cusip, px in (("AAAAAA101", 100), ("BBBBBB102", 50), ("CCCCCC103", 20)):
+            rows.append((cik, cusip, px * 10.0, 10.0))
+    rows += [("4", "AAAAAA101", 1.0, 10.0), ("4", "BBBBBB102", 0.5, 10.0), ("4", "CCCCCC103", 0.2, 10.0)]
+    rows += [("5", "AAAAAA101", 1000.0, 10.0), ("5", "BBBBBB102", 25000.0, 10.0), ("5", "CCCCCC103", 200.0, 10.0)]
+    rows += [("6", "AAAAAA101", 1.0, 10.0)]
+    c.execute(
+        "CREATE TABLE holdings (cik VARCHAR, period DATE, cusip VARCHAR, issuer VARCHAR, "
+        "title_of_class VARCHAR, value_usd DOUBLE, shares DOUBLE)"
+    ).fetchall()
+    c.executemany(
+        "INSERT INTO holdings VALUES (?, DATE '2026-06-30', ?, 'X INC', 'COM', ?, ?)", rows
+    )
+    checks = metrics.build_holdings_ok(c)
+    got = {(r[0], r[1]): r[2] for r in c.execute("SELECT cik, cusip, value_usd FROM holdings_ok").fetchall()}
+    # Filer 4 is rescaled by 1000 and kept in full.
+    assert got[("4", "AAAAAA101")] == pytest.approx(1000)
+    assert got[("4", "CCCCCC103")] == pytest.approx(200)
+    # Filer 5 keeps its good rows; only the 50x row is dropped.
+    assert ("5", "BBBBBB102") not in got and got[("5", "AAAAAA101")] == 1000
+    # Filer 6 has too few comparable rows to rescale, so its 1000x-off row is dropped.
+    assert ("6", "AAAAAA101") not in got
+    assert checks["rescaled_filings"] == 1 and checks["rescaled_rows"] == 3
+    assert checks["dropped"] == 2

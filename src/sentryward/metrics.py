@@ -2,9 +2,9 @@
 
 Steps (all run by ``build_all``)
 --------------------------------
-1. holdings_ok     holdings with likely unit errors removed: a row is dropped when its
-                   implied price (value / shares) is more than 10x away from the median
-                   price every filer reported for that stock that quarter.
+1. holdings_ok     holdings with unit errors fixed. A filing whose prices are nearly all
+                   about 1000x off the median price other filers reported is rescaled;
+                   any row still more than 10x off is dropped.
 2. universe        the funds in universe.csv matched to SEC filer CIKs.
 3. fund_positions  each fund's positions grouped by company. ETFs and other fund
                    products are flagged and kept out of ``weight``.
@@ -53,6 +53,8 @@ ETF_ISSUER_PATTERN = (
 ETF_TITLE_PATTERN = r"(\bETF\b|\bETN\b|\bINDEX\b|TR UNIT|UNIT SER)"
 
 PRICE_TOLERANCE = 10  # keep rows whose implied price is within 10x of the median
+UNIT_BAND = 2         # a filing's median price ratio within 2x of 1000 (or 1/1000) is a unit error
+MIN_JUDGED_ROWS = 3   # a filing needs this many comparable rows before it is rescaled
 
 
 # ------------------------------------------------------------------ helpers
@@ -89,6 +91,14 @@ def _has_table(con: duckdb.DuckDBPyConnection, name: str) -> bool:
 
 
 def build_holdings_ok(con: duckdb.DuckDBPyConnection) -> dict[str, int]:
+    """Fix filings reported in the wrong units, then drop rows that are still far off.
+
+    For every row, ratio = its price per share / the median price all filers reported
+    for that stock (only where at least 3 filers hold it). If a filing's median ratio
+    is about 1/1000 or 1000, the whole filing used the wrong units and every value in
+    it is rescaled. Rows whose ratio is still outside 1/10 to 10 are dropped.
+    """
+    lo, hi = 1 / UNIT_BAND, UNIT_BAND
     con.execute(
         f"""
         CREATE OR REPLACE TABLE holdings_ok AS
@@ -98,16 +108,66 @@ def build_holdings_ok(con: duckdb.DuckDBPyConnection) -> dict[str, int]:
         med AS (
             SELECT period, cusip, median(px) AS med_px, count(*) AS n
             FROM p WHERE px > 0 GROUP BY ALL
+        ),
+        r AS (
+            SELECT p.*, med.n, CASE WHEN med.n >= 3 THEN p.px / med.med_px END AS ratio
+            FROM p LEFT JOIN med USING (period, cusip)
+        ),
+        f AS (
+            SELECT cik, period, median(ratio) AS filing_ratio, count(ratio) AS judged
+            FROM r GROUP BY ALL
+        ),
+        fixed AS (
+            SELECT r.*,
+                CASE WHEN f.judged >= {MIN_JUDGED_ROWS} AND f.filing_ratio BETWEEN {0.001 * lo} AND {0.001 * hi} THEN 1000.0
+                     WHEN f.judged >= {MIN_JUDGED_ROWS} AND f.filing_ratio BETWEEN {1000 * lo} AND {1000 * hi} THEN 0.001
+                     ELSE 1.0 END AS unit_fix
+            FROM r JOIN f USING (cik, period)
+        ),
+        kept AS (
+            SELECT * REPLACE (value_usd * unit_fix AS value_usd)
+            FROM fixed
+            WHERE coalesce(n, 0) < 3          -- too few filers to judge: keep
+               OR ratio * unit_fix BETWEEN {1 / PRICE_TOLERANCE} AND {PRICE_TOLERANCE}
         )
-        SELECT p.* EXCLUDE (px)
-        FROM p LEFT JOIN med USING (period, cusip)
-        WHERE coalesce(med.n, 0) < 3      -- too few filers to judge: keep
-           OR p.px BETWEEN med.med_px / {PRICE_TOLERANCE} AND med.med_px * {PRICE_TOLERANCE}
+        SELECT * EXCLUDE (px, n, ratio) FROM kept
         """
     ).fetchall()
     total = con.execute("SELECT count(*) FROM holdings").fetchall()[0][0]
-    kept = con.execute("SELECT count(*) FROM holdings_ok").fetchall()[0][0]
-    return {"rows": total, "kept": kept, "dropped": total - kept}
+    kept, fixed_rows, fixed_filings = con.execute(
+        """SELECT count(*), count(*) FILTER (WHERE unit_fix <> 1),
+                  count(DISTINCT (cik, period)) FILTER (WHERE unit_fix <> 1)
+           FROM holdings_ok"""
+    ).fetchall()[0]
+    return {
+        "rows": total,
+        "kept": kept,
+        "dropped": total - kept,
+        "rescaled_rows": fixed_rows,
+        "rescaled_filings": fixed_filings,
+    }
+
+
+def universe_data_checks(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+    """Per universe fund: quarters, rescaled quarters and share of rows dropped."""
+    return con.execute(
+        """
+        WITH a AS (
+            SELECT u.fund, count(*) AS rows, count(DISTINCT h.period) AS quarters
+            FROM holdings h JOIN universe u USING (cik) GROUP BY u.fund
+        ),
+        b AS (
+            SELECT u.fund, count(*) AS rows_kept, count(DISTINCT h.period) AS quarters_kept,
+                   count(DISTINCT h.period) FILTER (WHERE h.unit_fix <> 1) AS quarters_rescaled
+            FROM holdings_ok h JOIN universe u USING (cik) GROUP BY u.fund
+        )
+        SELECT a.fund, a.quarters, coalesce(b.quarters_kept, 0) AS quarters_kept,
+               coalesce(b.quarters_rescaled, 0) AS quarters_rescaled,
+               round(1 - coalesce(b.rows_kept, 0) / a.rows, 4) AS share_dropped
+        FROM a LEFT JOIN b USING (fund)
+        ORDER BY share_dropped DESC, quarters_rescaled DESC, fund
+        """
+    ).df()
 
 
 # ------------------------------------------------------------------ 2. universe

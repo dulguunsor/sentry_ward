@@ -45,10 +45,14 @@ def cmd_build(args, paths):
     print("Building metrics (on full 13F data this takes a few minutes)...")
     matched = metrics.build_all(con, Path(args.universe), min_holders=args.min_holders)
     c = matched.attrs["checks"]
-    print(f"Unit check: dropped {c['dropped']:,} of {c['rows']:,} holdings rows "
-          f"({c['dropped'] / max(c['rows'], 1):.2%}) whose price was over 10x off the median.")
+    print(f"Unit check: rescaled {c['rescaled_filings']:,} filings ({c['rescaled_rows']:,} rows) "
+          f"reported in the wrong units.")
+    print(f"            dropped {c['dropped']:,} of {c['rows']:,} rows "
+          f"({c['dropped'] / max(c['rows'], 1):.2%}) still over 10x off the median price.")
     print(f"Universe: {matched.fund.nunique()} funds from {len(matched)} filer CIKs")
     print(matched[["fund", "cik", "manager_name"]].to_string(index=False))
+    print("\nData checks per fund (quarters filed, kept, rescaled; share of rows dropped):")
+    print(metrics.universe_data_checks(con).to_string(index=False))
     missing = metrics.unmatched_patterns(con, Path(args.universe))
     if missing:
         print("\nNo filer matched these names (check the pattern in the universe file):")
