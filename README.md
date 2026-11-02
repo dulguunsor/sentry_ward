@@ -126,10 +126,22 @@ How it works:
 - The stress test did not find that crowded stocks fall harder in most sell-offs, so a
   warning is a reason to look closer, not a forecast.
 
+Stock and fund pages:
+
+- **Search** in the menu bar finds a stock by ticker, company name or CUSIP, and a fund by name.
+- **Stock page** (click any ticker): crowding score by quarter, hedge fund ownership, days
+  to exit, and every tracked fund holding it with its value, portfolio weight and whether
+  it bought, added, trimmed or sold out since its previous filing.
+- **Fund page** (click any fund): 13F value, active share, every holding with its weight
+  against the 13F market and its crowding score, new and closed positions, and the funds
+  it overlaps with most.
+- The pages read the database without locking it, so other `ward` commands can still run.
+
 | Part | Built with | Where |
 |---|---|---|
 | Baskets, history, snapshot | Python, DuckDB | `src/sentryward/live.py` |
-| API (`/api/live`, `/api/meta`) | Flask | `src/sentryward/server.py` |
+| API (`/api/live`, `/api/meta`, `/api/search`, `/api/stock/<key>`, `/api/fund/<name>`) | Flask | `src/sentryward/server.py` |
+| Search, stock and fund look-ups | Python, DuckDB SQL | `src/sentryward/explore.py` |
 | Live screen | React, Vite | `web/live` (source), `src/sentryward/web/live` (built) |
 | Static dashboard script | JavaScript | `src/sentryward/web/dashboard.js` |
 
@@ -306,6 +318,7 @@ sample funds have overlaps of 0.80, 0.25 and 0.25, so the crowding index must be
 - [x] Unwind simulator (square-root impact model, in the dashboard)
 - [x] Dashboard (`ward dashboard`)
 - [x] Live view with delayed quotes (`ward live`)
+- [x] Stock and fund pages with search
 - [x] Docker image and pipeline script
 
 ## Contributing

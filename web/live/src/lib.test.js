@@ -78,3 +78,25 @@ describe("hover and ranges", () => {
     expect(pickRange("1D", [])).toBe(null);
   });
 });
+
+import { fundHref, num, parseRoute, stockHref, usd } from "./lib.js";
+
+describe("pages", () => {
+  it("formats dollar amounts", () => {
+    expect(usd(1234567890)).toBe("$1.23B");
+    expect(usd(45_600_000)).toBe("$45.6M");
+    expect(usd(312_000_000_000)).toBe("$312B");
+    expect(usd(950)).toBe("$950");
+    expect(usd(-2_500_000)).toBe("-$2.50M");
+    expect(usd(null)).toBe("--");
+    expect(num(1234567.4)).toBe("1,234,567");
+  });
+  it("routes by hash and round-trips names with spaces", () => {
+    expect(parseRoute("")).toEqual({ page: "live", key: null });
+    expect(parseRoute("#/stock/NVDA")).toEqual({ page: "stock", key: "NVDA" });
+    expect(parseRoute(fundHref("Two Sigma"))).toEqual({ page: "fund", key: "Two Sigma" });
+    expect(parseRoute(stockHref("BRK.B"))).toEqual({ page: "stock", key: "BRK.B" });
+    expect(parseRoute("#/other/x")).toEqual({ page: "live", key: null });
+    expect(parseRoute("#/fund/%E0%A4%A")).toEqual({ page: "fund", key: "%E0%A4%A" });
+  });
+});

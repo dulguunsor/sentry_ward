@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { HistoryChart, PathChart } from "./charts.jsx";
-import { RANGE_KEYS, freshness, hhmm, isNum, pct, pickRange, zLevel } from "./lib.js";
+import { RANGE_KEYS, freshness, hhmm, isNum, parseRoute, pct, pickRange, stockHref, zLevel } from "./lib.js";
+import { FundPage, SearchBox, StockPage } from "./pages.jsx";
 
 const POLL_MS = 15000;
 
@@ -25,6 +26,16 @@ function useApi() {
     return () => { alive = false; clearInterval(id); };
   }, []);
   return { meta, state, failed, now };
+}
+
+function useRoute() {
+  const [route, setRoute] = useState(() => parseRoute(window.location.hash));
+  useEffect(() => {
+    const on = () => { setRoute(parseRoute(window.location.hash)); window.scrollTo(0, 0); };
+    window.addEventListener("hashchange", on);
+    return () => window.removeEventListener("hashchange", on);
+  }, []);
+  return route;
 }
 
 const RANGE_KEY = "sentryward.range";
@@ -73,7 +84,7 @@ function StockDetail({ s, range }) {
   if (!s) return <div className="detail dim">Hover a row to see the stock's matched peers.</div>;
   return (
     <div className="detail">
-      <div><span className="tk">{s.ticker}</span> <span className="dim">{s.issuer || ""}</span></div>
+      <div><a className="tk" href={stockHref(s.ticker)}>{s.ticker}</a> <span className="dim">{s.issuer || ""}</span> <span className="faint">· click for its page</span></div>
       <div className="dim">
         Crowding score {isNum(s.score) ? s.score.toFixed(0) : "--"} · beta {isNum(s.beta) ? s.beta.toFixed(2) : "--"} ·
         {" "}{range}: <b className={signCls(s.ret)}>{pct(s.ret)}</b>, peers <b className={signCls(s.peers_ret)}>{pct(s.peers_ret)}</b>
@@ -109,7 +120,7 @@ function BasketTable({ stocks, range }) {
         {rows.map((s) => (
           <tr key={s.ticker} className={hot === s.ticker ? "hot" : ""} tabIndex={0}
             onMouseEnter={() => setHot(s.ticker)} onFocus={() => setHot(s.ticker)}>
-            <td className="l tk" title={s.issuer || ""}>{s.ticker}</td>
+            <td className="l" title={s.issuer || ""}><a className="tk" href={stockHref(s.ticker)}>{s.ticker}</a></td>
             <td>{isNum(s.score) ? s.score.toFixed(0) : "--"}</td>
             <td className={signCls(s.ret)}>{pct(s.ret)}</td>
             <td className={signCls(s.peers_ret)}>{pct(s.peers_ret)}</td>
@@ -131,6 +142,7 @@ function BasketTable({ stocks, range }) {
 
 export default function App() {
   const { meta, state, failed, now } = useApi();
+  const route = useRoute();
   const snap = state?.snapshot;
   const ok = snap?.status === "ok";
   const fresh = failed ? "offline" : freshness(state?.last_update, state?.interval ?? 120, now);
@@ -148,14 +160,19 @@ export default function App() {
         <span className="dim">13F CROWDING RESEARCH</span>
         <span className={`dot ${fresh}`}>{{ live: "LIVE", stale: "STALE", offline: "OFFLINE" }[fresh]}</span>
         <span className="dim">{ok ? `SESSION ${snap.session} · ${hhmm(snap.as_of)} ET` : "WAITING FOR QUOTES"}</span>
-        <span className="push or outline" title="Quotes from Yahoo Finance arrive about 15 minutes late. Yahoo's smallest bar is 1 minute.">DELAYED ~15 MIN</span>
+        <span className="push"><SearchBox /></span>
+        <span className="or outline" title="Quotes from Yahoo Finance arrive about 15 minutes late. Yahoo's smallest bar is 1 minute.">DELAYED ~15 MIN</span>
       </header>
       <nav className="tabs" aria-label="Screens">
-        <a href="/" aria-current="page">LIVE</a>
+        <a href="#/" aria-current={route.page === "live" ? "page" : undefined}>LIVE</a>
+        {route.page !== "live" && <a href={window.location.hash} aria-current="page">{route.page.toUpperCase()} · {route.key}</a>}
         <a href="/dashboard">DASHBOARD</a>
       </nav>
 
       <main>
+        {route.page === "stock" && <StockPage key={route.key} id={route.key} />}
+        {route.page === "fund" && <FundPage key={route.key} id={route.key} />}
+        {route.page === "live" && <>
         <Banner snap={snap} alertZ={alertZ} />
         <div className="kpis">
           <Kpi label="CROWDED BASKET" value={ok ? pct(snap.crowded) : "--"} cls={ok ? signCls(snap.crowded) : "dim"}
@@ -227,6 +244,7 @@ export default function App() {
             </div>
           </div>
         )}
+        </>}
       </main>
 
       <footer className="status">

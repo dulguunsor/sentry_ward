@@ -78,3 +78,26 @@ export function pickRange(saved, available) {
   if (available.includes("1D")) return "1D";
   return available[0] ?? null;
 }
+
+/** 1234567890 -> "$1.23B". */
+export function usd(v) {
+  if (!isNum(v)) return "--";
+  const a = Math.abs(v);
+  const [d, s] = a >= 1e12 ? [1e12, "T"] : a >= 1e9 ? [1e9, "B"] : a >= 1e6 ? [1e6, "M"] : a >= 1e3 ? [1e3, "K"] : [1, ""];
+  return `${v < 0 ? "-" : ""}$${(a / d).toFixed(d === 1 ? 0 : a / d >= 100 ? 0 : a / d >= 10 ? 1 : 2)}${s}`;
+}
+
+/** 1234567 -> "1,234,567"; fractional counts are rounded. */
+export const num = (v, digits = 0) => (isNum(v) ? v.toLocaleString("en-US", { maximumFractionDigits: digits, minimumFractionDigits: digits }) : "--");
+
+/** "#/stock/NVDA" -> { page: "stock", key: "NVDA" }. Anything unknown is the live page. */
+export function parseRoute(hash) {
+  const m = /^#\/(stock|fund)\/(.+)$/.exec(hash || "");
+  if (!m) return { page: "live", key: null };
+  let key = m[2];
+  try { key = decodeURIComponent(key); } catch { /* keep as is */ }
+  return { page: m[1], key };
+}
+
+export const stockHref = (key) => `#/stock/${encodeURIComponent(key)}`;
+export const fundHref = (name) => `#/fund/${encodeURIComponent(name)}`;

@@ -103,7 +103,9 @@ def cmd_live(args, paths):
     interval = max(60, args.interval)
     monitor = live.LiveMonitor(baskets, hist, interval=interval, daily=daily, daily_fetcher=live.yahoo_daily)
     monitor.start()
-    app = server.create_app(monitor, live.meta(baskets, hist), html)
+    db_path = str(paths.db)
+    app = server.create_app(monitor, live.meta(baskets, hist), html,
+                            connect=lambda: duckdb.connect(db_path, read_only=True))
     url = f"http://{'localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host}:{args.port}/"
     sig = hist["sigma"]
     print(f"Live mode: {len(baskets['crowded'])} crowded stocks vs {len(baskets['peers'])} matched peers "

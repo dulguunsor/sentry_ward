@@ -139,3 +139,62 @@ export function HistoryChart({ history, sigma, alertZ, today }) {
     </div>
   );
 }
+
+/**
+ * A plain line chart over quarters (or any labelled points), with a hover readout.
+ *   data    [{ t, ...values }]
+ *   series  [{ k, label, color }]
+ *   fmt     formats a value for the axis and the readout
+ */
+export function LineChart({ data, series, fmt, domain, height = 220, width = 900, label }) {
+  const W = width, H = height, L = 70, R = 24, T = 14, B = 28;
+  const n = data.length;
+  const vals = data.flatMap((d) => series.map((s) => d[s.k])).filter(isNum);
+  if (!vals.length) return <div className="empty">No history yet.</div>;
+  let lo = domain ? domain[0] : Math.min(...vals), hi = domain ? domain[1] : Math.max(...vals);
+  if (!domain) { const p = (hi - lo) * 0.1 || Math.abs(hi) * 0.1 || 1; lo -= p; hi += p; }
+  const x = scale([0, Math.max(1, n - 1)], [L, W - R]);
+  const y = scale([lo, hi], [H - B, T]);
+  const { ref, hover, handlers } = useHover(W, (vx) => nearestIndex(vx, L, W - R, n));
+  const h = hover ? data[hover.i] : null;
+  const line = (k) => {
+    let d = "", pen = false;
+    data.forEach((p, i) => {
+      if (!isNum(p[k])) { pen = false; return; }
+      d += `${pen ? "L" : "M"}${x(i).toFixed(1)},${y(p[k]).toFixed(1)}`;
+      pen = true;
+    });
+    return d;
+  };
+  return (
+    <div className="chartbox" ref={ref} {...handlers}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label={label}>
+        {ticks(lo, hi, 4).map((v) => (
+          <g key={v}>
+            <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke={C.grid} strokeOpacity="0.3" strokeDasharray="2 4" />
+            <text x={L - 8} y={y(v) + 4} fill={C.dim} fontSize="11" textAnchor="end">{fmt(v)}</text>
+          </g>
+        ))}
+        {labelIndexes(n, 6).map((i) => (
+          <text key={i} x={x(i)} y={H - 8} fill={C.dim} fontSize="11" textAnchor="middle">{data[i].t}</text>
+        ))}
+        {series.map((s) => <path key={s.k} d={line(s.k)} fill="none" stroke={s.color} strokeWidth="2" />)}
+        {series.map((s) => data.map((p, i) => isNum(p[s.k]) && (n <= 40 || i === n - 1) && (
+          <circle key={`${s.k}${i}`} cx={x(i)} cy={y(p[s.k])} r={i === n - 1 ? 3.5 : 2.5} fill={s.color} />
+        )))}
+        {h && <line x1={x(hover.i)} x2={x(hover.i)} y1={T} y2={H - B} stroke={C.fg} strokeOpacity="0.35" />}
+      </svg>
+      <Tip hover={hover}>
+        {h && <>
+          <div className="tiphead">{h.t}</div>
+          {series.map((s) => (
+            <div className="tiprow" key={s.k}>
+              <span><i style={{ background: s.color }} />{s.label}</span><b>{isNum(h[s.k]) ? fmt(h[s.k]) : "--"}</b>
+            </div>
+          ))}
+          {h.note && <div className="tipnote">{h.note}</div>}
+        </>}
+      </Tip>
+    </div>
+  );
+}

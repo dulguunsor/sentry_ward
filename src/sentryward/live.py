@@ -45,6 +45,8 @@ def clean(v):
         return {k: clean(x) for k, x in v.items()}
     if isinstance(v, (list, tuple)):
         return [clean(x) for x in v]
+    if isinstance(v, np.ndarray):
+        return [clean(x) for x in v.tolist()]
     if hasattr(v, "item") and not isinstance(v, (str, bytes)):
         v = v.item()
     if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
