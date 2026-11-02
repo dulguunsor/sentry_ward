@@ -9,3 +9,4 @@ data/*.duckdb
 data/*.duckdb.wal
 *.part
 data/*.duckdb.tmp/
+node_modules/
