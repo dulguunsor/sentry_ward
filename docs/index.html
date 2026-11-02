@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sentry Ward</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap">
+<style>
+/* Terminal layout after Fincept Terminal: menu bar, screen tabs, KPI strip, orange-barred panels, status bar. */
+:root {
+  --bg: #080808; --panel: #0a0a0a; --raise: #111111; --line: #1a1a1a; --line-2: #262626; --grid: #525252;
+  --fg: #e5e5e5; --dim: #8a8a8a; --faint: #5c5c5c;
+  --orange: #d97706; --orange-hi: #f59e0b; --ink: #080808;
+  --up: #16a34a; --down: #dc2626; --cyan: #0891b2;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--mono); font-size: 13px; }
+body { padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px)); }
+a { color: var(--orange-hi); }
+button { font-family: inherit; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--orange-hi); outline-offset: 1px; }
+.up { color: var(--up); } .down { color: var(--down); } .dim { color: var(--dim); } .or { color: var(--orange-hi); }
+
+/* menu bar */
+.menubar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 0; background: var(--bg); border-bottom: 1px solid var(--line);
+           padding: 6px max(12px, env(safe-area-inset-right, 0px)) 6px max(12px, env(safe-area-inset-left, 0px)); font-size: 13px; }
+.menubar > span { padding: 0 12px; border-left: 1px solid var(--line-2); white-space: nowrap; }
+.menubar > span:first-child { border-left: 0; padding-left: 0; }
+.brand b { color: var(--orange-hi); font-weight: 800; letter-spacing: .02em; } .brand i { font-style: normal; font-weight: 800; color: var(--fg); }
+.live { color: var(--up); font-weight: 700; } .live::before { content: "●"; margin-right: 6px; }
+.menubar .push { margin-left: auto; }
+.outline { border: 1px solid currentColor; padding: 1px 8px; font-weight: 700; }
+
+/* screen tabs */
+.tabs { display: flex; flex-wrap: wrap; background: var(--bg); border-bottom: 1px solid var(--line);
+        padding: 0 max(12px, env(safe-area-inset-right, 0px)) 0 max(12px, env(safe-area-inset-left, 0px)); }
+.tabs a { color: var(--fg); text-decoration: none; padding: 9px 16px; font-size: 13px; letter-spacing: .03em; font-weight: 500; }
+.tabs a:hover { background: var(--raise); }
+.tabs a[aria-current="page"] { background: var(--orange); color: var(--ink); font-weight: 700; }
+
+main { padding: 10px max(12px, env(safe-area-inset-right, 0px)) 16px max(12px, env(safe-area-inset-left, 0px)); display: flex; flex-direction: column; gap: 10px; }
+.screen { display: flex; flex-direction: column; gap: 10px; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: stretch; }
+.row > * { min-width: 0; }
+.c-narrow { flex: 1 1 300px; } .c-wide { flex: 999 1 560px; } .c-side { flex: 1 1 400px; } .c-half { flex: 1 1 520px; }
+
+/* KPI strip */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); border: 1px solid var(--line); background: var(--panel); }
+.kpi { padding: 10px 14px; border-left: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
+.kpi:first-child { border-left: 0; }
+.kpi .l { color: var(--dim); font-size: 11px; letter-spacing: .08em; }
+.kpi .v { font-size: 26px; font-weight: 700; color: var(--orange-hi); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.kpi .v small { font-size: 15px; margin-left: 8px; color: var(--orange-hi); }
+.kpi .d { font-size: 11px; color: var(--dim); }
+.kpi .d.up { color: var(--up); } .kpi .d.down { color: var(--down); }
+
+/* panels */
+.panel { background: var(--panel); border: 1px solid var(--line); display: flex; flex-direction: column; }
+.ph { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; justify-content: space-between; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+.ph h2 { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .06em; border-left: 3px solid var(--orange); padding-left: 8px; color: var(--fg); }
+.ph small { color: var(--dim); font-size: 11px; }
+.pb { padding: 10px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
+.note { color: var(--dim); font-size: 11px; line-height: 1.55; max-width: 100ch; }
+.scroll { overflow-x: auto; }
+
+/* segmented buttons */
+.seg { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.seg .lbl { color: var(--dim); font-size: 11px; margin-right: 4px; letter-spacing: .06em; }
+.seg button { min-height: 28px; padding: 0 12px; background: transparent; color: var(--dim); border: 1px solid var(--line-2); cursor: pointer; font-size: 12px; font-weight: 700; }
+.seg button:hover { color: var(--fg); }
+.seg button[aria-pressed="true"] { background: var(--orange); color: var(--ink); border-color: var(--orange); }
+
+/* tables */
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th { color: var(--fg); font-weight: 700; font-size: 11px; letter-spacing: .05em; text-align: right; padding: 8px; border-bottom: 1px solid var(--line-2); white-space: nowrap; }
+td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+th.l, td.l { text-align: left; }
+tbody tr:hover { background: var(--raise); }
+.tk { color: var(--orange-hi); font-weight: 700; }
+.nm { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; color: var(--fg); }
+.chip { display: inline-block; padding: 0 5px; font-size: 10px; font-weight: 700; border: 1px solid currentColor; margin-left: 6px; }
+.bar { display: flex; align-items: center; gap: 6px; min-width: 120px; }
+.bar .t { flex: 1; height: 6px; background: var(--line-2); } .bar .f { height: 6px; }
+.bar span { width: 30px; text-align: right; font-weight: 700; }
+
+/* crowding map tiles */
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+.tile { padding: 8px 9px; min-height: 52px; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid transparent; }
+.tile b { font-size: 13px; } .tile span { font-size: 11px; opacity: .9; }
+.legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--dim); }
+.legend i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; vertical-align: -1px; }
+
+/* overlap matrix */
+.heat { display: grid; gap: 1px; font-variant-numeric: tabular-nums; font-size: 11px; background: var(--line); }
+.heat div { height: 26px; display: flex; align-items: center; justify-content: center; background: var(--panel); }
+.heat .rl { justify-content: flex-start; color: var(--fg); white-space: nowrap; padding: 0 8px 0 4px; font-weight: 700; }
+.heat .cl { color: var(--fg); font-size: 10px; font-weight: 700; height: 24px; }
+
+.verdict { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; padding: 8px 10px; background: var(--raise); border-left: 3px solid var(--orange); }
+.verdict b { font-weight: 800; }
+svg text { font-family: var(--mono); }
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
+.notes .panel .pb { line-height: 1.6; }
+
+.status { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 0; align-items: center; background: var(--bg); border-top: 1px solid var(--line);
+          padding: 4px max(12px, env(safe-area-inset-right, 0px)) calc(4px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+          font-size: 11px; color: var(--dim); z-index: 5; }
+.status span { padding: 0 10px; border-left: 1px solid var(--line-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.status span:first-child { border-left: 0; padding-left: 0; }
+.status .ready { margin-left: auto; color: var(--up); font-weight: 700; }
+[hidden] { display: none !important; }
+@media (max-width: 640px) { .status .opt { display: none; } .kpi { border-left: 0; border-top: 1px solid var(--line); } .kpi:first-child { border-top: 0; } }
+
+</style>
+</head>
+<body>
+<header class="menubar">
+  <span class="brand"><b>SENTRY</b> <i>WARD</i></span>
+  <span class="dim">13F CROWDING RESEARCH</span>
+  <span class="live" id="mbLive"></span>
+  <span class="dim" id="mbBuilt"></span>
+  <span class="push or outline" id="mbFunds"></span>
+</header>
+<nav class="tabs" aria-label="Screens">
+  <a href="#dashboard">DASHBOARD</a><a href="#crowded">CROWDED</a><a href="#overlap">OVERLAP</a>
+  <a href="#stress">STRESS</a><a href="#unwind">UNWIND</a><a href="#funds">FUNDS</a><a href="#about">ABOUT</a>
+</nav>
+
+<main>
+  <!-- DASHBOARD -->
+  <div class="screen" data-screen="dashboard">
+    <div class="kpis" id="kpis"></div>
+    <div class="row">
+      <div class="panel c-narrow"><div class="ph"><h2>CROWDING MAP</h2><small>top 12 · color = exit risk</small></div>
+        <div class="pb"><div class="tiles" id="tiles"></div>
+          <div class="legend"><span><i style="background:#0b3d1c"></i>EASY EXIT</span><span><i style="background:#4a3206"></i>MEDIUM</span><span><i style="background:#4c0e0e"></i>HARD EXIT</span></div></div></div>
+      <div class="panel c-wide"><div class="ph"><h2>CROWDING INDEX</h2>
+          <div class="seg" id="segIdx"><span class="lbl">SERIES</span></div></div>
+        <div class="pb"><div id="chIdx"></div><div class="note" id="idxNote"></div></div></div>
+      <div class="panel c-side"><div class="ph"><h2>CROWDED AND HARD TO EXIT</h2><small>top 25% on both</small></div>
+        <div class="pb"><div class="scroll"><table id="tExit"></table></div></div></div>
+    </div>
+    <div class="row">
+      <div class="panel c-wide"><div class="ph"><h2>STRESS TEST</h2><small>pre-registered result</small></div>
+        <div class="pb" id="stressMini"></div></div>
+      <div class="panel c-side"><div class="ph"><h2>MOST SIMILAR FUND PAIRS</h2><small>by active overlap</small></div>
+        <div class="pb"><div class="scroll"><table id="tPairsMini"></table></div></div></div>
+    </div>
+  </div>
+
+  <!-- CROWDED -->
+  <div class="screen" data-screen="crowded" hidden>
+    <div class="panel"><div class="ph"><h2>MOST CROWDED STOCKS</h2><small id="crowdNote"></small></div>
+      <div class="pb"><div class="scroll"><table id="tStocks"></table></div>
+      <div class="note">FUNDS = universe funds holding it. OWN = share of the company they own together. EXIT DAYS = trading days to sell it all at 20% of daily volume. EXIT RISK = percentile of both. SCORE = crowding score 0-100. Δ QoQ: red = more crowded than last quarter. HARD EXIT = top 25% for both crowding and days to exit.</div></div></div>
+  </div>
+
+  <!-- OVERLAP -->
+  <div class="screen" data-screen="overlap" hidden>
+    <div class="row">
+      <div class="panel c-wide"><div class="ph"><h2>FUND OVERLAP MATRIX</h2><div class="seg" id="segOv"><span class="lbl">MEASURE</span></div></div>
+        <div class="pb"><div class="scroll"><div class="heat" id="heat"></div></div><div class="note" id="ovExplain"></div></div></div>
+      <div class="panel c-side"><div class="ph"><h2>MOST SIMILAR PAIRS</h2><small>by active overlap</small></div>
+        <div class="pb"><div class="scroll"><table id="tPairs"></table></div>
+        <div class="note">ACTIVE = share of the bets each fund makes beyond the market that are the same bet. RAW = share of the two portfolios that is identical.</div></div></div>
+    </div>
+  </div>
+
+  <!-- STRESS -->
+  <div class="screen" data-screen="stress" hidden>
+    <div class="panel"><div class="ph"><h2>STRESS TEST</h2>
+        <div class="row" style="gap:12px"><div class="seg" id="segTest"><span class="lbl">TEST</span></div><div class="seg" id="segRun"><span class="lbl">HOLDINGS</span></div></div></div>
+      <div class="pb" id="stressBody"></div></div>
+  </div>
+
+  <!-- UNWIND -->
+  <div class="screen" data-screen="unwind" hidden>
+    <div class="panel"><div class="ph"><h2>UNWIND SIMULATOR</h2>
+        <div class="row" style="gap:12px"><div class="seg" id="segFrac"><span class="lbl">FUNDS SELL</span></div><div class="seg" id="segDays"><span class="lbl">OVER</span></div></div></div>
+      <div class="pb"><div class="scroll"><table id="tUnwind"></table></div>
+      <div class="note">Estimated price move = 0.7 × daily volatility × √(shares sold ÷ average daily volume), a standard rule of thumb for large trades. Spreading the sale over more days lowers the share of daily volume, not the estimated move, in this simple model. Red: over 20% of daily volume, or a move of 2.5% or more. An illustration, not a forecast.</div></div></div>
+  </div>
+
+  <!-- FUNDS -->
+  <div class="screen" data-screen="funds" hidden>
+    <div class="row">
+      <div class="panel c-wide"><div class="ph"><h2>FUNDS</h2><small>most index-like first</small></div>
+        <div class="pb"><div class="scroll"><table id="tFunds"></table></div></div></div>
+      <div class="panel c-side"><div class="ph"><h2>ETFS HELD MOST WIDELY</h2><small>kept out of all scores</small></div>
+        <div class="pb"><div class="scroll"><table id="tEtfs"></table></div></div></div>
+    </div>
+  </div>
+
+  <!-- ABOUT -->
+  <div class="screen" data-screen="about" hidden>
+    <div class="notes">
+      <div class="panel"><div class="ph"><h2>DATA</h2></div><div class="pb">SEC Form 13F holdings of the universe funds, Yahoo Finance prices and volume, SEC XBRL shares outstanding, OpenFIGI ticker mapping. <span id="aboutCov"></span></div></div>
+      <div class="panel"><div class="ph"><h2>BLIND SPOTS</h2></div><div class="pb">13F shows long US stock positions only. Shorts, options, futures and non-US stocks are invisible, and holdings are quarter-end snapshots filed up to 45 days later. True crowding is likely higher than measured.</div></div>
+      <div class="panel"><div class="ph"><h2>METHOD</h2></div><div class="pb">Share classes merged by issuer, unit errors fixed, ETFs separated. Active overlap compares the bets each fund makes beyond the combined 13F market. The stress test design was committed in PREREGISTRATION.md before it was run.</div></div>
+    </div>
+  </div>
+</main>
+
+<footer class="status">
+  <span id="stVer">SENTRY WARD</span><span class="opt">13F · PX · XBRL · FIGI</span><span class="opt" id="stPeriod"></span><span class="ready">READY</span>
+</footer>
+
+<script>
+const DATA = {"generated":"2026-11-02 11:18","period":"2026-06-30","n_funds":23,"missing_funds":["Pershing Square"],"coverage":{"value_priced_share":0.9823047256150197,"value_with_shares_share":0.8543521112422894},"stocks":[{"rank":1,"ticker":"AMZN","issuer":"AMAZON COM INC","holders":21,"n_funds":23,"sum_weight":0.8967145689310795,"value_usd":24752659298.0,"own":0.009628347656199587,"dte":8.240962164190977,"exit_risk":27.18780510749247,"score":100.0,"change":4.347826086956516,"total_shares":103854377.0,"adv_shares":63011075.0,"daily_vol":0.02021140863934491,"close":238.33999633789062},{"rank":2,"ticker":"GOOGL","issuer":"ALPHABET INC","holders":20,"n_funds":23,"sum_weight":0.6790266804022087,"value_usd":25478617506.0,"own":0.008595704057279236,"dte":12.744453012894976,"exit_risk":34.6991827989789,"score":85.48096622329403,"change":6.776905463188712,"total_shares":104446400.0,"adv_shares":40977200.0,"daily_vol":0.02240626133944853,"close":357.3699951171875},{"rank":3,"ticker":"SPCX","issuer":"SPACE EXPLORATION TECHN CORP","holders":16,"n_funds":23,"sum_weight":0.7993327243842914,"value_usd":31225048792.0,"own":0.03119131019781719,"dte":4.991793224641804,"exit_risk":38.70781514925149,"score":82.66531379597801,"change":null,"total_shares":182905843.0,"adv_shares":183206550.0,"daily_vol":0.0949268291583557,"close":170.86000061035156},{"rank":4,"ticker":"TSM","issuer":"TAIWAN SEMICONDUCTOR MANUFAC","holders":19,"n_funds":23,"sum_weight":0.47718176841097915,"value_usd":13058049227.0,"own":null,"dte":9.547961668374034,"exit_risk":43.81513366560942,"score":71.84532260698919,"change":1.4060302131607187,"total_shares":27345916.0,"adv_shares":14320290.0,"daily_vol":0.029374204461230673,"close":477.57000732421875},{"rank":5,"ticker":"NVDA","issuer":"NVIDIA CORPORATION","holders":17,"n_funds":23,"sum_weight":0.5023667138793585,"value_usd":27831726606.0,"own":0.005767733030177759,"dte":4.344492945815598,"exit_risk":13.828014281118042,"score":68.48770781320665,"change":-0.07020579445968167,"total_shares":139521462.0,"adv_shares":160572780.0,"daily_vol":0.025230446889473523,"close":200.08999633789062},{"rank":6,"ticker":"META","issuer":"META PLATFORMS INC","holders":19,"n_funds":23,"sum_weight":0.306259418217416,"value_usd":12478480736.0,"own":0.008722349980338183,"dte":6.026234476920197,"exit_risk":21.11313232745041,"score":62.314845679570155,"change":0.7698207983104766,"total_shares":22180936.0,"adv_shares":18403645.0,"daily_vol":0.024821928426177586,"close":563.2899780273438},{"rank":7,"ticker":"MU","issuer":"MICRON TECHNOLOGY INC","holders":15,"n_funds":23,"sum_weight":0.3598503085832926,"value_usd":14098833189.0,"own":0.0108149150622926,"dte":1.0543083620526397,"exit_risk":11.433731070115302,"score":55.77921613089805,"change":13.134634909777382,"total_shares":12214291.0,"adv_shares":57925610.0,"daily_vol":0.06280956874795539,"close":1154.2900390625},{"rank":8,"ticker":"MSFT","issuer":"MICROSOFT CORP","holders":17,"n_funds":23,"sum_weight":0.2279548557574061,"value_usd":14052597438.0,"own":0.005079495377910681,"dte":3.9119057392903898,"exit_risk":12.183711031128338,"score":53.1867487550159,"change":-7.0010633335963135,"total_shares":37718024.0,"adv_shares":48209270.0,"daily_vol":0.02232328579905985,"close":373.0199890136719},{"rank":9,"ticker":"V","issuer":"VISA INC","holders":18,"n_funds":23,"sum_weight":0.18119103290824612,"value_usd":6062189545.0,"own":null,"dte":9.927025035329853,"exit_risk":45.5595831445401,"score":52.960192321602506,"change":6.291917321692765,"total_shares":17673718.0,"adv_shares":8901820.0,"daily_vol":0.015244734193417627,"close":343.0899963378906},{"rank":10,"ticker":"AMD","issuer":"ADVANCED MICRO DEVICES INC","holders":17,"n_funds":23,"sum_weight":0.18870957282873754,"value_usd":8697294273.0,"own":0.009232586478954573,"dte":2.3591369722119917,"exit_risk":12.430935074795519,"score":50.9984669823973,"change":15.188298011223885,"total_shares":15071967.0,"adv_shares":31943815.0,"daily_vol":0.04974151371302804,"close":580.9099731445312},{"rank":11,"ticker":"LRCX","issuer":"LAM RESEARCH CORP","holders":16,"n_funds":23,"sum_weight":0.21445377936794852,"value_usd":9069026210.0,"own":0.016725271932621605,"dte":7.6824500223917305,"exit_risk":33.395340545884274,"score":50.05298846521292,"change":4.727287510088516,"total_shares":20928684.0,"adv_shares":13621100.0,"daily_vol":0.043147870252688104,"close":433.3299865722656},{"rank":12,"ticker":"AMAT","issuer":"APPLIED MATLS INC","holders":16,"n_funds":23,"sum_weight":0.21443197313874768,"value_usd":8221455283.0,"own":0.014328811288773268,"dte":4.539098216463335,"exit_risk":23.294487386014346,"score":50.051772569433126,"change":9.247820160692903,"total_shares":11371308.0,"adv_shares":12525955.0,"daily_vol":0.04283705352145629,"close":723.0},{"rank":13,"ticker":"ASML","issuer":"ASML HLDG NV","holders":17,"n_funds":23,"sum_weight":0.15580418665913726,"value_usd":5042765142.0,"own":null,"dte":5.485185601945823,"exit_risk":25.147258722247397,"score":49.16369216610181,"change":3.300374540893216,"total_shares":2534803.0,"adv_shares":2310590.0,"daily_vol":0.03569016557979883,"close":1989.43994140625},{"rank":14,"ticker":"AVGO","issuer":"BROADCOM INC","holders":16,"n_funds":23,"sum_weight":0.17651882292062562,"value_usd":10148815732.0,"own":0.005651516922679104,"dte":3.608213064239035,"exit_risk":11.97607094469351,"score":47.937769321815765,"change":-0.9587224385949398,"total_shares":26887545.0,"adv_shares":37258810.0,"daily_vol":0.035154850717279015,"close":377.75},{"rank":15,"ticker":"INTC","issuer":"INTEL CORP","holders":16,"n_funds":23,"sum_weight":0.16451391871356147,"value_usd":8071800275.0,"own":0.011497456582077716,"dte":2.210124805962491,"exit_risk":14.669442994091838,"score":47.268386631771236,"change":14.819320858407316,"total_shares":57993171.0,"adv_shares":131198860.0,"daily_vol":0.058214853518092864,"close":139.6300048828125},{"rank":16,"ticker":"COF","issuer":"CAPITAL ONE FINL CORP","holders":17,"n_funds":23,"sum_weight":0.107714285644436,"value_usd":4648871028.0,"own":0.03777195236167174,"dte":22.578458186651027,"exit_risk":70.10189407391492,"score":46.48224242273328,"change":3.740008489365586,"total_shares":23172520.0,"adv_shares":5131555.0,"daily_vol":0.019025195284666067,"close":200.6199951171875},{"rank":17,"ticker":"STX","issuer":"SEAGATE TECHNOLOGY HLDNGS PL","holders":16,"n_funds":23,"sum_weight":0.14457664427994216,"value_usd":7336154243.0,"own":0.03354254083480634,"dte":8.262533352896742,"exit_risk":48.00611383925838,"score":46.15670209332411,"change":18.75171530712478,"total_shares":7602233.0,"adv_shares":4600425.0,"daily_vol":0.0427033392225028,"close":965.0},{"rank":18,"ticker":"SHW","issuer":"SHERWIN WILLIAMS CO","holders":16,"n_funds":23,"sum_weight":0.09019973331856103,"value_usd":3712360291.0,"own":0.04441754048456235,"dte":18.62197598751019,"exit_risk":70.07545374389507,"score":43.12469431485115,"change":6.901343925751014,"total_shares":10782720.0,"adv_shares":2895160.0,"daily_vol":0.019594232210638756,"close":344.32000732421875},{"rank":19,"ticker":"NU","issuer":"NU HLDGS LTD","holders":15,"n_funds":23,"sum_weight":0.11687964012881782,"value_usd":2423186718.0,"own":null,"dte":14.901514782475974,"exit_risk":62.279111916628906,"score":42.23138960544604,"change":0.6710405157254016,"total_shares":181400595.0,"adv_shares":60866495.0,"daily_vol":0.02450975953898742,"close":13.359999656677246},{"rank":20,"ticker":"PSX","issuer":"PHILLIPS 66","holders":12,"n_funds":23,"sum_weight":0.23850717360610238,"value_usd":4574645437.0,"own":0.06781825441952521,"dte":49.656311242577495,"exit_risk":88.74865154316899,"score":41.870374627943114,"change":5.052823106954946,"total_shares":27060902.0,"adv_shares":2724820.0,"daily_vol":0.020779685742110577,"close":169.0500030517578},{"rank":21,"ticker":"SPOT","issuer":"SPOTIFY TECHNOLOGY S A","holders":16,"n_funds":23,"sum_weight":0.06629312919098489,"value_usd":2791023851.0,"own":null,"dte":16.270599413835097,"exit_risk":65.40552786588128,"score":41.79168351320477,"change":-2.1130141963023092,"total_shares":6078940.0,"adv_shares":1868075.0,"daily_vol":0.03225359852990045,"close":459.1300048828125},{"rank":22,"ticker":"934423104","issuer":"WARNER BROS DISCOVERY INC","holders":13,"n_funds":23,"sum_weight":0.18854195595838744,"value_usd":5505711087.0,"own":null,"dte":null,"exit_risk":null,"score":41.46531129225137,"change":12.03557581030421,"total_shares":206515794.0,"adv_shares":null,"daily_vol":null,"close":null},{"rank":23,"ticker":"DHR","issuer":"DANAHER CORP DEL","holders":16,"n_funds":23,"sum_weight":0.05506535598296133,"value_usd":2287507255.0,"own":0.01708308853592137,"dte":14.099013353307333,"exit_risk":45.68606533377716,"score":41.16563295057102,"change":2.692612222667975,"total_shares":12009173.0,"adv_shares":4258870.0,"daily_vol":0.019609986469667818,"close":190.47999572753906},{"rank":24,"ticker":"SE","issuer":"SEA LTD","holders":15,"n_funds":23,"sum_weight":0.09082023021331904,"value_usd":2988264136.0,"own":null,"dte":44.07447569365585,"exit_risk":91.61758042591754,"score":40.7783402841574,"change":2.9103325754760263,"total_shares":31243911.0,"adv_shares":3544445.0,"daily_vol":0.032357512734761215,"close":95.83000183105469},{"rank":25,"ticker":"HPE","issuer":"HEWLETT PACKARD ENTERPRISE C","holders":14,"n_funds":23,"sum_weight":0.11768654189639907,"value_usd":3480738010.0,"own":0.05596353039753019,"dte":10.17208027513869,"exit_risk":62.60887153784752,"score":39.89542934325354,"change":11.23482666686829,"total_shares":74107104.0,"adv_shares":36426720.0,"daily_vol":0.04262200305209549,"close":45.11000061035156},{"rank":26,"ticker":"PFGC","issuer":"PERFORMANCE FOOD GROUP CO","holders":15,"n_funds":23,"sum_weight":0.07340883347914574,"value_usd":1283328414.0,"own":0.07288866248698876,"dte":36.7182107727139,"exit_risk":88.25535848077762,"score":39.807496420489144,"change":16.41472150469585,"total_shares":11482372.0,"adv_shares":1563580.0,"daily_vol":0.018318248607843833,"close":111.79000091552734},{"rank":27,"ticker":"UNP","issuer":"UNION PAC CORP","holders":14,"n_funds":23,"sum_weight":0.1140205075515512,"value_usd":2076257345.0,"own":0.012855726293562776,"dte":13.739387299479912,"exit_risk":40.65352424550431,"score":39.69101455666109,"change":6.747366937658732,"total_shares":7637272.0,"adv_shares":2779335.0,"daily_vol":0.0177731698795455,"close":272.0},{"rank":28,"ticker":"TFPM","issuer":"TRIPLE FLAG PRECIOUS METAL","holders":10,"n_funds":23,"sum_weight":0.2804741474284924,"value_usd":4058779553.0,"own":null,"dte":864.3799408975153,"exit_risk":98.48210240144994,"score":39.44851068150187,"change":1.9917143251952325,"total_shares":135428456.0,"adv_shares":783385.0,"daily_vol":0.029093056233720195,"close":29.969999313354492},{"rank":29,"ticker":"SNOW","issuer":"SNOWFLAKE INC","holders":15,"n_funds":23,"sum_weight":0.06555402182254652,"value_usd":3644141188.0,"own":0.04116444623872965,"dte":9.070014699295317,"exit_risk":53.85874351098637,"score":39.369519168376335,"change":15.058395582685922,"total_shares":14376971.0,"adv_shares":7925550.0,"daily_vol":0.057959502154734784,"close":254.5},{"rank":30,"ticker":"SCHW","issuer":"SCHWAB CHARLES CORP","holders":15,"n_funds":23,"sum_weight":0.058745180079909635,"value_usd":3771508328.0,"own":0.023636068271241404,"dte":16.800211838369872,"exit_risk":55.08082252248542,"score":38.98986426041864,"change":5.160182249503194,"total_shares":40874697.0,"adv_shares":12164935.0,"daily_vol":0.01941065703316931,"close":92.2699966430664}],"hard_exit":[{"ticker":"TFPM","issuer":"TRIPLE FLAG PRECIOUS METAL","holders":10,"own":null,"dte":864.3799408975153,"exit_risk":98.48210240144994,"score":39.44851068150187,"rank":28,"value_usd":4058779553.0},{"ticker":"LAB","issuer":"STANDARD BIOTOOLS INC","holders":11,"own":0.18166118635726256,"dte":58.31242743278027,"exit_risk":96.49119425682633,"score":26.272660224898736,"rank":602,"value_usd":58671947.0},{"ticker":"EXEL","issuer":"EXELIXIS INC","holders":9,"own":0.146780303687651,"dte":64.43666618239544,"exit_risk":96.37663804802455,"score":22.48231869688653,"rank":1064,"value_usd":1977650351.0},{"ticker":"MYGN","issuer":"MYRIAD GENETICS INC","holders":10,"own":0.19309166280753054,"dte":53.385832302373714,"exit_risk":96.28402731313923,"score":23.86089157852967,"rank":984,"value_usd":105458835.0},{"ticker":"HLF","issuer":"HERBALIFE LTD","holders":11,"own":0.17599801647618618,"dte":51.26767598156662,"exit_risk":96.12468257688013,"score":27.528505097329624,"rank":344,"value_usd":242554258.0},{"ticker":"PCTY","issuer":"PAYLOCITY HLDG CORP","holders":13,"own":0.1507123391137182,"dte":51.50753642605929,"exit_risk":95.97439017466203,"score":31.442934246742798,"rank":153,"value_usd":835857315.0},{"ticker":"LBTYA","issuer":"LIBERTY GLOBAL LTD","holders":12,"own":0.11134025952912827,"dte":92.23432980924093,"exit_risk":95.77921183324446,"score":29.694358936832955,"rank":198,"value_usd":424640235.0},{"ticker":"ADPT","issuer":"ADAPTIVE BIOTECHNOLOGIES COR","holders":10,"own":0.22978596773216686,"dte":45.61882850809431,"exit_risk":95.77907267361277,"score":24.95173240802068,"rank":651,"value_usd":786633382.0},{"ticker":"AES","issuer":"AES CORP","holders":10,"own":0.123620028817335,"dte":55.68915462266695,"exit_risk":95.33369227240999,"score":25.062792985764908,"rank":647,"value_usd":1292735758.0},{"ticker":"ARVN","issuer":"ARVINAS INC","holders":12,"own":0.13248821911036232,"dte":49.65010115830558,"exit_risk":95.2524091315437,"score":28.60979405806216,"rank":325,"value_usd":71988698.0},{"ticker":"PEN","issuer":"PENUMBRA INC","holders":13,"own":0.1095996026547432,"dte":51.54150598741628,"exit_risk":94.61901015197344,"score":33.69052076937978,"rank":87,"value_usd":1363113204.0},{"ticker":"ETSY","issuer":"ETSY INC","holders":13,"own":0.24677037094564816,"dte":37.44022693234679,"exit_risk":94.55242226821294,"score":33.54234166065263,"rank":92,"value_usd":1706150373.0},{"ticker":"SXC","issuer":"SUNCOKE ENERGY INC","holders":10,"own":0.14259183963211716,"dte":40.97709135356039,"exit_risk":94.5513785709753,"score":23.87264552725568,"rank":962,"value_usd":97424809.0},{"ticker":"IBTA","issuer":"IBOTTA INC","holders":10,"own":0.10102942993177338,"dte":66.4734759630331,"exit_risk":94.49108766054847,"score":23.850759473204025,"rank":1006,"value_usd":80345377.0},{"ticker":"SITC","issuer":"SITE CTRS CORP","holders":10,"own":0.14102048964371627,"dte":40.096668536555455,"exit_risk":94.4187176940915,"score":23.826495282029743,"rank":1043,"value_usd":29378389.0}],"index":[{"period":"2018-12-31","raw":0.13012377949190637,"active":0.04414815744641439,"n_pairs":253,"raw_change":null,"active_change":null},{"period":"2019-03-31","raw":0.1298589994941595,"active":0.04238959935188229,"n_pairs":253,"raw_change":-0.00026477999774683224,"active_change":-0.0017585580945321299},{"period":"2019-06-30","raw":0.13299207918298686,"active":0.04203142119945543,"n_pairs":253,"raw_change":0.0031330796888272257,"active_change":-0.0003581781524268589},{"period":"2019-09-30","raw":0.13816422677681975,"active":0.044836384392922805,"n_pairs":253,"raw_change":0.005172147593832985,"active_change":0.0028049631934673994},{"period":"2019-12-31","raw":0.14456003049919497,"active":0.046790394686975496,"n_pairs":253,"raw_change":0.006395803722375219,"active_change":0.0019540102940526784},{"period":"2020-03-31","raw":0.1374591753669371,"active":0.040762763909054055,"n_pairs":276,"raw_change":0.004230054397999169,"active_change":-0.0028717403234783142},{"period":"2020-06-30","raw":0.14296001399388186,"active":0.04287323774127277,"n_pairs":276,"raw_change":0.00550083862694467,"active_change":0.0021104738322186576},{"period":"2020-09-30","raw":0.14332137931310107,"active":0.041127457489056295,"n_pairs":276,"raw_change":0.00036136531921914867,"active_change":-0.0017457802522164558},{"period":"2020-12-31","raw":0.1501708528279326,"active":0.03963925427517196,"n_pairs":276,"raw_change":0.00684947351483161,"active_change":-0.001488203213884327},{"period":"2021-03-31","raw":0.1333368274444355,"active":0.036622762742458737,"n_pairs":276,"raw_change":-0.016834025383497264,"active_change":-0.0030164915327131974},{"period":"2021-06-30","raw":0.14041289862409717,"active":0.04008795958866471,"n_pairs":276,"raw_change":0.007076071179661797,"active_change":0.003465196846205949},{"period":"2021-09-30","raw":0.12868623356363,"active":0.03678986046251323,"n_pairs":276,"raw_change":-0.011726665060467172,"active_change":-0.0032980991261514466},{"period":"2021-12-31","raw":0.1328257670154274,"active":0.037149779131361485,"n_pairs":276,"raw_change":0.004139533451797317,"active_change":0.0003599186688482382},{"period":"2022-03-31","raw":0.1273377769280435,"active":0.03618490924515827,"n_pairs":276,"raw_change":-0.005487990087383837,"active_change":-0.0009648698862032205},{"period":"2022-06-30","raw":0.12271682329425175,"active":0.036166087527902395,"n_pairs":253,"raw_change":0.0034232421399874187,"active_change":0.0013065298232226184},{"period":"2022-09-30","raw":0.13419889492095685,"active":0.03830888294331999,"n_pairs":276,"raw_change":0.004169868382700166,"active_change":0.000710517553251014},{"period":"2022-12-31","raw":0.13177432713954373,"active":0.03926245692912808,"n_pairs":276,"raw_change":-0.0024245677814130613,"active_change":0.0009535739858080697},{"period":"2023-03-31","raw":0.135709592657693,"active":0.04168909666791327,"n_pairs":253,"raw_change":0.011576069374957308,"active_change":0.004084252073325123},{"period":"2023-06-30","raw":0.15431347954730654,"active":0.04390334121176719,"n_pairs":276,"raw_change":0.010349433672180589,"active_change":0.00017995912980426382},{"period":"2023-09-30","raw":0.14728391134028684,"active":0.04266502140051485,"n_pairs":253,"raw_change":0.0012248850104132237,"active_change":0.0007959656027972979},{"period":"2023-12-31","raw":0.1574175928919757,"active":0.04478992599776561,"n_pairs":276,"raw_change":0.002177751029286234,"active_change":0.00034959612971741767},{"period":"2024-03-31","raw":0.16491747907224721,"active":0.04751381838153228,"n_pairs":276,"raw_change":0.007499886180271576,"active_change":0.0027238923837666386},{"period":"2024-06-30","raw":0.16850007665226327,"active":0.048141165430553474,"n_pairs":276,"raw_change":0.003582597580016184,"active_change":0.0006273470490212233},{"period":"2024-09-30","raw":0.1626538392732413,"active":0.049104380548407205,"n_pairs":276,"raw_change":-0.005846237379022147,"active_change":0.0009632151178537139},{"period":"2024-12-31","raw":0.16505540924123066,"active":0.049940650807216304,"n_pairs":276,"raw_change":0.00240156996798944,"active_change":0.0008362702588091126},{"period":"2025-03-31","raw":0.15666061314518442,"active":0.04959323377383996,"n_pairs":276,"raw_change":-0.008394796096046453,"active_change":-0.00034741703337636806},{"period":"2025-06-30","raw":0.16184186438541356,"active":0.05026606645137154,"n_pairs":276,"raw_change":0.0051812512402293195,"active_change":0.0006728326775316283},{"period":"2025-09-30","raw":0.17368318945182448,"active":0.05078747380310213,"n_pairs":276,"raw_change":0.011841325066410904,"active_change":0.0005214073517305658},{"period":"2025-12-31","raw":0.18251563885516062,"active":0.05058111388541389,"n_pairs":276,"raw_change":0.008832449403335973,"active_change":-0.000206359917688212},{"period":"2026-03-31","raw":0.16712568521715931,"active":0.04967547767857818,"n_pairs":276,"raw_change":-0.01538995363800106,"active_change":-0.0009056362068357287},{"period":"2026-06-30","raw":0.17700144414178093,"active":0.05167420344941088,"n_pairs":253,"raw_change":0.002009618000444909,"active_change":-0.00021549859972338757}],"pairs":[{"fund_a":"Coatue","fund_b":"Tiger Global","active_overlap":0.285,"raw_overlap":0.523,"shared_stocks":18},{"fund_a":"Citadel","fund_b":"Millennium","active_overlap":0.224,"raw_overlap":0.548,"shared_stocks":2947},{"fund_a":"Appaloosa","fund_b":"Tiger Global","active_overlap":0.208,"raw_overlap":0.429,"shared_stocks":10},{"fund_a":"Balyasny","fund_b":"Citadel","active_overlap":0.207,"raw_overlap":0.499,"shared_stocks":1764},{"fund_a":"Balyasny","fund_b":"Millennium","active_overlap":0.195,"raw_overlap":0.458,"shared_stocks":1713},{"fund_a":"D. E. Shaw","fund_b":"Two Sigma","active_overlap":0.182,"raw_overlap":0.445,"shared_stocks":2499},{"fund_a":"Citadel","fund_b":"Point72","active_overlap":0.18,"raw_overlap":0.428,"shared_stocks":1647},{"fund_a":"Millennium","fund_b":"Schonfeld","active_overlap":0.169,"raw_overlap":0.437,"shared_stocks":1841}],"overlap":{"funds":["AQR","Appaloosa","Balyasny","Baupost","Bridgewater","Citadel","Coatue","D. E. Shaw","D1 Capital","Elliott","ExodusPoint","Lone Pine","Man Group","Maverick","Millennium","Point72","Renaissance","Schonfeld","Third Point","Tiger Global","Two Sigma","Verition","Viking Global"],"values":[[1.0,0.096,0.3698,0.0395,0.4392,0.5115,0.135,0.462,0.0458,0.0146,0.3092,0.0317,0.5244,0.1143,0.4557,0.3291,0.3714,0.3973,0.0421,0.1224,0.4331,0.3108,0.0947],[0.096,1.0,0.0881,0.2543,0.1819,0.0897,0.3725,0.1463,0.0292,0.0,0.1067,0.0219,0.1538,0.2199,0.0741,0.0875,0.0866,0.149,0.2491,0.4294,0.0656,0.068,0.1306],[0.3698,0.0881,1.0,0.0428,0.3005,0.4993,0.1072,0.3837,0.0821,0.0123,0.3149,0.0316,0.3789,0.1124,0.4582,0.3776,0.2738,0.4124,0.0801,0.122,0.3297,0.3658,0.1051],[0.0395,0.2543,0.0428,1.0,0.0699,0.0442,0.1003,0.0759,0.0215,0.0217,0.0697,0.0082,0.0579,0.1127,0.0253,0.039,0.0366,0.0465,0.1998,0.1942,0.0311,0.0495,0.0973],[0.4392,0.1819,0.3005,0.0699,1.0,0.382,0.212,0.363,0.0391,0.0133,0.2376,0.0568,0.438,0.1674,0.3228,0.2965,0.2928,0.3254,0.0842,0.2444,0.2871,0.2328,0.0894],[0.5115,0.0897,0.4993,0.0442,0.382,1.0,0.1208,0.485,0.062,0.0135,0.3745,0.0392,0.481,0.1133,0.5476,0.4285,0.3647,0.4414,0.0718,0.1222,0.4148,0.3568,0.1043],[0.135,0.3725,0.1072,0.1003,0.212,0.1208,1.0,0.1653,0.137,0.0144,0.1607,0.1261,0.1738,0.2566,0.1116,0.1007,0.1253,0.188,0.1938,0.5225,0.0794,0.0836,0.1399],[0.462,0.1463,0.3837,0.0759,0.363,0.485,0.1653,1.0,0.0696,0.0097,0.3178,0.0478,0.4601,0.1952,0.452,0.3381,0.3827,0.4085,0.1044,0.1821,0.4446,0.2808,0.1378],[0.0458,0.0292,0.0821,0.0215,0.0391,0.062,0.137,0.0696,1.0,0.0007,0.0606,0.0609,0.0581,0.0726,0.0766,0.0692,0.0633,0.0891,0.0494,0.0844,0.0608,0.0372,0.1079],[0.0146,0.0,0.0123,0.0217,0.0133,0.0135,0.0144,0.0097,0.0007,1.0,0.0098,0.0,0.015,0.0002,0.0092,0.0174,0.0097,0.0088,0.0,0.0,0.017,0.0112,0.0007],[0.3092,0.1067,0.3149,0.0697,0.2376,0.3745,0.1607,0.3178,0.0606,0.0098,1.0,0.0219,0.2938,0.1093,0.3831,0.2736,0.2199,0.3163,0.0961,0.1287,0.2679,0.2472,0.0793],[0.0317,0.0219,0.0316,0.0082,0.0568,0.0392,0.1261,0.0478,0.0609,0.0,0.0219,1.0,0.0281,0.0788,0.0303,0.0743,0.0427,0.0458,0.1467,0.0809,0.0357,0.0333,0.0553],[0.5244,0.1538,0.3789,0.0579,0.438,0.481,0.1738,0.4601,0.0581,0.015,0.2938,0.0281,1.0,0.1743,0.4082,0.2952,0.3385,0.3856,0.0783,0.1893,0.3865,0.2688,0.1105],[0.1143,0.2199,0.1124,0.1127,0.1674,0.1133,0.2566,0.1952,0.0726,0.0002,0.1093,0.0788,0.1743,1.0,0.0976,0.1124,0.1136,0.1557,0.1583,0.3053,0.08,0.0787,0.2087],[0.4557,0.0741,0.4582,0.0253,0.3228,0.5476,0.1116,0.452,0.0766,0.0092,0.3831,0.0303,0.4082,0.0976,1.0,0.393,0.3478,0.4374,0.0659,0.0987,0.3945,0.3772,0.1001],[0.3291,0.0875,0.3776,0.039,0.2965,0.4285,0.1007,0.3381,0.0692,0.0174,0.2736,0.0743,0.2952,0.1124,0.393,1.0,0.2572,0.3738,0.0837,0.1254,0.2956,0.2561,0.1249],[0.3714,0.0866,0.2738,0.0366,0.2928,0.3647,0.1253,0.3827,0.0633,0.0097,0.2199,0.0427,0.3385,0.1136,0.3478,0.2572,1.0,0.2897,0.0421,0.1185,0.3709,0.2176,0.0697],[0.3973,0.149,0.4124,0.0465,0.3254,0.4414,0.188,0.4085,0.0891,0.0088,0.3163,0.0458,0.3856,0.1557,0.4374,0.3738,0.2897,1.0,0.0843,0.1689,0.3237,0.2999,0.1077],[0.0421,0.2491,0.0801,0.1998,0.0842,0.0718,0.1938,0.1044,0.0494,0.0,0.0961,0.1467,0.0783,0.1583,0.0659,0.0837,0.0421,0.0843,1.0,0.2449,0.0415,0.0775,0.0922],[0.1224,0.4294,0.122,0.1942,0.2444,0.1222,0.5225,0.1821,0.0844,0.0,0.1287,0.0809,0.1893,0.3053,0.0987,0.1254,0.1185,0.1689,0.2449,1.0,0.0673,0.0715,0.1615],[0.4331,0.0656,0.3297,0.0311,0.2871,0.4148,0.0794,0.4446,0.0608,0.017,0.2679,0.0357,0.3865,0.08,0.3945,0.2956,0.3709,0.3237,0.0415,0.0673,1.0,0.24,0.0867],[0.3108,0.068,0.3658,0.0495,0.2328,0.3568,0.0836,0.2808,0.0372,0.0112,0.2472,0.0333,0.2688,0.0787,0.3772,0.2561,0.2176,0.2999,0.0775,0.0715,0.24,1.0,0.0683],[0.0947,0.1306,0.1051,0.0973,0.0894,0.1043,0.1399,0.1378,0.1079,0.0007,0.0793,0.0553,0.1105,0.2087,0.1001,0.1249,0.0697,0.1077,0.0922,0.1615,0.0867,0.0683,1.0]]},"active_overlap":{"funds":["AQR","Appaloosa","Balyasny","Baupost","Bridgewater","Citadel","Coatue","D. E. Shaw","D1 Capital","Elliott","ExodusPoint","Lone Pine","Man Group","Maverick","Millennium","Point72","Renaissance","Schonfeld","Third Point","Tiger Global","Two Sigma","Verition","Viking Global"],"values":[[1.0,0.0013,0.1022,0.005,0.1447,0.1361,0.0084,0.1246,0.0045,0.0045,0.0812,0.0069,0.1678,0.0079,0.1278,0.1143,0.1204,0.0986,0.0052,0.0056,0.1584,0.0723,0.02],[0.0013,1.0,0.0069,0.1197,0.0293,0.0016,0.1604,0.0032,0.0007,0.0,0.0261,0.0068,0.0084,0.0497,0.0053,0.0179,0.002,0.0227,0.1074,0.2081,0.008,0.0016,0.0474],[0.1022,0.0069,1.0,0.0016,0.0883,0.2068,0.011,0.1117,0.0178,0.0054,0.116,0.0048,0.1178,0.0131,0.1954,0.1595,0.0806,0.1632,0.0148,0.0184,0.1011,0.1584,0.0209],[0.005,0.1197,0.0016,1.0,0.0058,0.0043,0.0193,0.003,0.0044,0.0114,0.0258,0.0,0.001,0.0211,0.0052,0.0042,0.0031,0.0018,0.0756,0.0756,0.0043,0.0169,0.0352],[0.1447,0.0293,0.0883,0.0058,1.0,0.1006,0.0385,0.0914,0.007,0.0054,0.0567,0.0203,0.1067,0.0143,0.0902,0.1071,0.0934,0.0768,0.0122,0.0507,0.0928,0.0509,0.018],[0.1361,0.0016,0.2068,0.0043,0.1006,1.0,0.0061,0.1366,0.0074,0.0044,0.1362,0.0071,0.1148,0.0107,0.2237,0.18,0.1072,0.1551,0.0142,0.0119,0.1256,0.1141,0.0184],[0.0084,0.1604,0.011,0.0193,0.0385,0.0061,1.0,0.0082,0.0613,0.0066,0.05,0.0652,0.0077,0.0765,0.0161,0.0217,0.02,0.0315,0.071,0.2851,0.0125,0.0068,0.0443],[0.1246,0.0032,0.1117,0.003,0.0914,0.1366,0.0082,1.0,0.0103,0.0036,0.0968,0.0141,0.1093,0.0268,0.1651,0.1177,0.1326,0.114,0.0181,0.0143,0.1818,0.0744,0.0306],[0.0045,0.0007,0.0178,0.0044,0.007,0.0074,0.0613,0.0103,1.0,0.0003,0.0183,0.0264,0.0049,0.0271,0.0197,0.0215,0.0102,0.028,0.0147,0.0318,0.0123,0.0061,0.0409],[0.0045,0.0,0.0054,0.0114,0.0054,0.0044,0.0066,0.0036,0.0003,1.0,0.0032,0.0,0.0065,0.0,0.0025,0.0076,0.0051,0.0035,0.0,0.0,0.007,0.0049,0.0004],[0.0812,0.0261,0.116,0.0258,0.0567,0.1362,0.05,0.0968,0.0183,0.0032,1.0,0.0055,0.0617,0.0168,0.1586,0.1131,0.0695,0.1156,0.0354,0.0337,0.0905,0.0995,0.0095],[0.0069,0.0068,0.0048,0.0,0.0203,0.0071,0.0652,0.0141,0.0264,0.0,0.0055,1.0,0.0019,0.0394,0.0061,0.0252,0.0162,0.0092,0.078,0.0358,0.0115,0.0069,0.0239],[0.1678,0.0084,0.1178,0.001,0.1067,0.1148,0.0077,0.1093,0.0049,0.0065,0.0617,0.0019,1.0,0.0104,0.1058,0.0757,0.0956,0.0852,0.0131,0.0078,0.1358,0.0566,0.0135],[0.0079,0.0497,0.0131,0.0211,0.0143,0.0107,0.0765,0.0268,0.0271,0.0,0.0168,0.0394,0.0104,1.0,0.0097,0.0284,0.0126,0.0144,0.0505,0.077,0.0095,0.0148,0.0897],[0.1278,0.0053,0.1954,0.0052,0.0902,0.2237,0.0161,0.1651,0.0197,0.0025,0.1586,0.0061,0.1058,0.0097,1.0,0.1594,0.1144,0.1687,0.0218,0.0092,0.1365,0.1522,0.0182],[0.1143,0.0179,0.1595,0.0042,0.1071,0.18,0.0217,0.1177,0.0215,0.0076,0.1131,0.0252,0.0757,0.0284,0.1594,1.0,0.0862,0.1472,0.0278,0.0323,0.1091,0.0788,0.0417],[0.1204,0.002,0.0806,0.0031,0.0934,0.1072,0.02,0.1326,0.0102,0.0051,0.0695,0.0162,0.0956,0.0126,0.1144,0.0862,1.0,0.0808,0.0019,0.0147,0.1544,0.0561,0.011],[0.0986,0.0227,0.1632,0.0018,0.0768,0.1551,0.0315,0.114,0.028,0.0035,0.1156,0.0092,0.0852,0.0144,0.1687,0.1472,0.0808,1.0,0.0175,0.0169,0.1035,0.097,0.0243],[0.0052,0.1074,0.0148,0.0756,0.0122,0.0142,0.071,0.0181,0.0147,0.0,0.0354,0.078,0.0131,0.0505,0.0218,0.0278,0.0019,0.0175,1.0,0.1112,0.0052,0.0307,0.0304],[0.0056,0.2081,0.0184,0.0756,0.0507,0.0119,0.2851,0.0143,0.0318,0.0,0.0337,0.0358,0.0078,0.077,0.0092,0.0323,0.0147,0.0169,0.1112,1.0,0.0042,0.0056,0.0581],[0.1584,0.008,0.1011,0.0043,0.0928,0.1256,0.0125,0.1818,0.0123,0.007,0.0905,0.0115,0.1358,0.0095,0.1365,0.1091,0.1544,0.1035,0.0052,0.0042,1.0,0.0621,0.0194],[0.0723,0.0016,0.1584,0.0169,0.0509,0.1141,0.0068,0.0744,0.0061,0.0049,0.0995,0.0069,0.0566,0.0148,0.1522,0.0788,0.0561,0.097,0.0307,0.0056,0.0621,1.0,0.0168],[0.02,0.0474,0.0209,0.0352,0.018,0.0184,0.0443,0.0306,0.0409,0.0004,0.0095,0.0239,0.0135,0.0897,0.0182,0.0417,0.011,0.0243,0.0304,0.0581,0.0194,0.0168,1.0]]},"funds":[{"fund":"Man Group","stocks":1881,"value_usd":53814447264.0,"etf_share":0.0367471142516574,"active_share":0.4092606771036469,"style":"quant"},{"fund":"Citadel","stocks":4623,"value_usd":171840295980.0,"etf_share":0.1112853041420838,"active_share":0.4396715577933005,"style":"multi-manager"},{"fund":"AQR","stocks":3261,"value_usd":286847511937.0,"etf_share":0.02787012416811835,"active_share":0.4615235867597019,"style":"quant"},{"fund":"D. E. Shaw","stocks":2940,"value_usd":154071426682.0,"etf_share":0.0852396697156976,"active_share":0.471432950157936,"style":"quant"},{"fund":"Millennium","stocks":3465,"value_usd":142918620112.0,"etf_share":0.1312513652965572,"active_share":0.5435620842362061,"style":"multi-manager"},{"fund":"Bridgewater","stocks":983,"value_usd":24376086530.0,"etf_share":0.306164031121857,"active_share":0.5528718496092023,"style":"macro"},{"fund":"Schonfeld","stocks":2097,"value_usd":18814233587.0,"etf_share":0.20581808528600576,"active_share":0.5794973933212165,"style":"multi-manager"},{"fund":"Balyasny","stocks":1921,"value_usd":52952331784.0,"etf_share":0.04332420993957413,"active_share":0.6110475939504186,"style":"multi-manager"},{"fund":"Two Sigma","stocks":3533,"value_usd":128645118746.0,"etf_share":0.04524451636981351,"active_share":0.6201507424183943,"style":"quant"},{"fund":"Renaissance","stocks":2836,"value_usd":72617871974.0,"etf_share":0.03103837605991811,"active_share":0.655396172384913,"style":"quant"},{"fund":"ExodusPoint","stocks":1377,"value_usd":10802851408.0,"etf_share":0.015530872513506298,"active_share":0.6593262207930105,"style":"multi-manager"},{"fund":"Point72","stocks":1814,"value_usd":62899401216.0,"etf_share":0.012522967242486763,"active_share":0.6795268809821714,"style":"multi-manager"},{"fund":"Verition","stocks":1211,"value_usd":13101704819.0,"etf_share":0.20696544376939835,"active_share":0.6961634471838603,"style":"multi-manager"},{"fund":"Tiger Global","stocks":46,"value_usd":23981506027.0,"etf_share":0.0,"active_share":0.7400640768551973,"style":"tiger-cub"},{"fund":"Coatue","stocks":63,"value_usd":48629053706.0,"etf_share":0.0,"active_share":0.7628571293931516,"style":"tiger-cub"},{"fund":"Maverick","stocks":177,"value_usd":11080517265.0,"etf_share":0.0,"active_share":0.7699811573998113,"style":"tiger-cub"},{"fund":"Appaloosa","stocks":24,"value_usd":7471257999.0,"etf_share":0.06553213663154614,"active_share":0.8080696008525058,"style":"fundamental"},{"fund":"Viking Global","stocks":90,"value_usd":35079228595.0,"etf_share":0.0,"active_share":0.8572120696851148,"style":"tiger-cub"},{"fund":"Third Point","stocks":36,"value_usd":4643126288.0,"etf_share":0.0,"active_share":0.8999503435938584,"style":"activist"},{"fund":"Baupost","stocks":23,"value_usd":5415853000.0,"etf_share":0.0,"active_share":0.9141554309112162,"style":"fundamental"},{"fund":"D1 Capital","stocks":54,"value_usd":34783267943.0,"etf_share":0.0,"active_share":0.9239440288949904,"style":"tiger-cub"},{"fund":"Lone Pine","stocks":34,"value_usd":16357760275.0,"etf_share":0.0,"active_share":0.9541696826930167,"style":"tiger-cub"},{"fund":"Elliott","stocks":17,"value_usd":14292858303.0,"etf_share":0.0,"active_share":0.9913092343900781,"style":"activist"}],"etfs":[{"cusip":"46090E103","issuer":"INVESCO QQQ TR","class":"UNIT SER 1","holders":12,"value_usd":1976120515.0},{"cusip":"78462F103","issuer":"STATE STR SPDR S&P 500 ETF T","class":"TR UNIT","holders":11,"value_usd":21702494437.0},{"cusip":"464286772","issuer":"ISHARES INC","class":"MSCI STH KOR ETF","holders":11,"value_usd":1115477714.0},{"cusip":"81369Y506","issuer":"SELECT SECTOR SPDR TR","class":"ST STR ENERG ETF","holders":11,"value_usd":1066961763.0},{"cusip":"464286400","issuer":"ISHARES INC","class":"MSCI BRAZIL ETF","holders":11,"value_usd":667165211.0},{"cusip":"464288513","issuer":"ISHARES TR","class":"IBOXX HI YD ETF","holders":11,"value_usd":503492159.0},{"cusip":"78464A698","issuer":"SPDR SERIES TRUST","class":"ST STR SP REGBNK","holders":11,"value_usd":334524141.0},{"cusip":"464287200","issuer":"ISHARES TR","class":"CORE S&P500 ETF","holders":10,"value_usd":31696286719.0}],"stress":{"primary":{"holdings":"last quarter-end holdings before each event","reps":2000,"seed":0,"h1":{"summary":{"events":6,"avg_diff":0.004912640471881465,"ci_low":-0.0023940139321920926,"ci_high":0.012264110800439511,"share_of_boot_below_zero":0.0975,"events_negative":2},"per_event":[{"event":"COVID crash","formation":"2019-12-31","start":"2020-02-19","end":"2020-03-23","n_stocks":2259,"status":"ok","diff":0.006212331865534708,"n_treated":226,"n_treated_matched":226,"n_control":2033,"treated_ret":-0.3905191927864426,"control_ret_matched":-0.3967315246519773,"raw_diff":0.017922874391998467,"ci_low":-0.017646830116048878,"ci_high":0.028340661684362528,"regression_coef":0.008523479208146076},{"event":"Degrossing, GameStop week","formation":"2020-12-31","start":"2021-01-22","end":"2021-01-29","n_stocks":2483,"status":"ok","diff":0.0012377816525238232,"n_treated":249,"n_treated_matched":249,"n_control":2234,"treated_ret":-0.04076017669969526,"control_ret_matched":-0.04199795835221908,"raw_diff":-0.003952268052484033,"ci_low":-0.004763099269442126,"ci_high":0.007407466667826901,"regression_coef":-0.002979588510193467},{"event":"2022 rate shock","formation":"2021-12-31","start":"2022-01-03","end":"2022-06-16","n_stocks":2892,"status":"ok","diff":0.028710674768559315,"n_treated":290,"n_treated_matched":290,"n_control":2602,"treated_ret":-0.20925864077597456,"control_ret_matched":-0.23796931554453388,"raw_diff":0.027234807621108192,"ci_low":-0.00520471216056766,"ci_high":0.06356144435091063,"regression_coef":0.03298166787221361},{"event":"Yen carry unwind","formation":"2024-06-30","start":"2024-07-16","end":"2024-08-05","n_stocks":3374,"status":"ok","diff":-0.0040241575441575346,"n_treated":338,"n_treated_matched":338,"n_control":3036,"treated_ret":-0.07526980780639148,"control_ret_matched":-0.07124565026223394,"raw_diff":0.017805209067079705,"ci_low":-0.015823163977952994,"ci_high":0.0075230966203587565,"regression_coef":-0.009044667569673702},{"event":"Tariff shock","formation":"2025-03-31","start":"2025-04-02","end":"2025-04-08","n_stocks":3609,"status":"ok","diff":0.007848877295403647,"n_treated":361,"n_treated_matched":361,"n_control":3248,"treated_ret":-0.13176642244050343,"control_ret_matched":-0.13961529973590708,"raw_diff":0.007624155075742878,"ci_low":0.0010465221617327848,"ci_high":0.014357632219591488,"regression_coef":0.009747711413554518},{"event":"Multi-manager drawdown","formation":"2025-12-31","start":"2026-02-27","end":"2026-03-31","n_stocks":3986,"status":"ok","diff":-0.010509665206575175,"n_treated":399,"n_treated_matched":399,"n_control":3587,"treated_ret":-0.06011392659916487,"control_ret_matched":-0.049604261392589694,"raw_diff":-0.01208228332015638,"ci_low":-0.02180399969890011,"ci_high":0.0005951762165933874,"regression_coef":-0.013370388859531778}]},"h2":{"summary":{"events":6,"avg_diff":0.0069031165479156885,"ci_low":-0.0014229743395951014,"ci_high":0.014854125837467527,"share_of_boot_below_zero":0.0515,"events_negative":1},"per_event":[{"event":"COVID crash","formation":"2019-12-31","start":"2020-02-19","end":"2020-03-23","n_stocks":2259,"status":"ok","diff":0.014292552268657336,"n_treated":123,"n_treated_matched":123,"n_control":2136,"treated_ret":-0.3913265743208026,"control_ret_matched":-0.4056191265894599,"raw_diff":0.016204741925474497,"ci_low":-0.010974807513210203,"ci_high":0.03986950868642865,"regression_coef":0.011975576599402264},{"event":"Degrossing, GameStop week","formation":"2020-12-31","start":"2021-01-22","end":"2021-01-29","n_stocks":2483,"status":"ok","diff":-2.9722637862811193e-05,"n_treated":161,"n_treated_matched":161,"n_control":2320,"treated_ret":-0.040149351522429516,"control_ret_matched":-0.0401196288845667,"raw_diff":-0.00311538545827815,"ci_low":-0.009078720637694056,"ci_high":0.010313518648741244,"regression_coef":-0.002410825619157741},{"event":"2022 rate shock","formation":"2021-12-31","start":"2022-01-03","end":"2022-06-16","n_stocks":2892,"status":"ok","diff":0.006527600606245281,"n_treated":174,"n_treated_matched":174,"n_control":2716,"treated_ret":-0.22113542001163045,"control_ret_matched":-0.22766302061787572,"raw_diff":0.013532409908837778,"ci_low":-0.02838056191641338,"ci_high":0.04043659333258927,"regression_coef":0.008732895403202101},{"event":"Yen carry unwind","formation":"2024-06-30","start":"2024-07-16","end":"2024-08-05","n_stocks":3374,"status":"ok","diff":0.01536569229128082,"n_treated":193,"n_treated_matched":193,"n_control":3180,"treated_ret":-0.05749238409369057,"control_ret_matched":-0.07285807638497138,"raw_diff":0.03586818475469712,"ci_low":0.003195975727244134,"ci_high":0.02772676727995206,"regression_coef":0.011549208323526418},{"event":"Tariff shock","formation":"2025-03-31","start":"2025-04-02","end":"2025-04-08","n_stocks":3609,"status":"ok","diff":0.00036463365940773073,"n_treated":193,"n_treated_matched":193,"n_control":3415,"treated_ret":-0.13544993074790937,"control_ret_matched":-0.1358145644073171,"raw_diff":0.003398220830258536,"ci_low":-0.008481644799061874,"ci_high":0.00929291415426434,"regression_coef":-0.0019130616572602954},{"event":"Multi-manager drawdown","formation":"2025-12-31","start":"2026-02-27","end":"2026-03-31","n_stocks":3986,"status":"ok","diff":0.00489794309976577,"n_treated":264,"n_treated_matched":264,"n_control":3713,"treated_ret":-0.049516092357898285,"control_ret_matched":-0.05441403545766406,"raw_diff":-0.00027828728055310364,"ci_low":-0.007257824716258998,"ci_high":0.0173629606823935,"regression_coef":-0.0008575565756264643}]},"ordinary_quarters":[{"from":"2019-03-31","to":"2019-06-30","n_stocks":2120,"diff":-0.014257975651683701,"n_treated":212,"n_treated_matched":212,"n_control":1908,"treated_ret":0.034227648148921666,"control_ret_matched":0.048485623800605365,"raw_diff":0.003931166980849377},{"from":"2019-06-30","to":"2019-09-30","n_stocks":2149,"diff":-0.0071122314225624435,"n_treated":215,"n_treated_matched":215,"n_control":1934,"treated_ret":-0.007015846361533012,"control_ret_matched":9.638506102943156e-05,"raw_diff":0.00836535018847491},{"from":"2019-09-30","to":"2019-12-31","n_stocks":2172,"diff":0.019961917893155396,"n_treated":218,"n_treated_matched":218,"n_control":1954,"treated_ret":0.10272525126671798,"control_ret_matched":0.08276333337356259,"raw_diff":0.00414873304585521},{"from":"2019-12-31","to":"2020-03-31","n_stocks":2259,"diff":0.028389657646409133,"n_treated":226,"n_treated_matched":226,"n_control":2033,"treated_ret":-0.24030583201820713,"control_ret_matched":-0.26869548966461626,"raw_diff":0.06656546657485723},{"from":"2020-03-31","to":"2020-06-30","n_stocks":2297,"diff":0.0411964224294878,"n_treated":230,"n_treated_matched":230,"n_control":2067,"treated_ret":0.26752167450400316,"control_ret_matched":0.22632525207451537,"raw_diff":-0.06232729238315854},{"from":"2020-06-30","to":"2020-09-30","n_stocks":2310,"diff":0.03237122127075329,"n_treated":231,"n_treated_matched":231,"n_control":2079,"treated_ret":0.10727703300542406,"control_ret_matched":0.07490581173467076,"raw_diff":0.042035159862630164},{"from":"2020-09-30","to":"2020-12-31","n_stocks":2308,"diff":0.0039044114944006354,"n_treated":231,"n_treated_matched":231,"n_control":2077,"treated_ret":0.18891210022387186,"control_ret_matched":0.18500768872947124,"raw_diff":-0.13546105813716228},{"from":"2020-12-31","to":"2021-03-31","n_stocks":2483,"diff":0.0065780012711423325,"n_treated":249,"n_treated_matched":249,"n_control":2234,"treated_ret":0.08952569518365697,"control_ret_matched":0.08294769391251464,"raw_diff":-0.10305994170950578},{"from":"2021-03-31","to":"2021-06-30","n_stocks":2632,"diff":0.012124507878807814,"n_treated":264,"n_treated_matched":264,"n_control":2368,"treated_ret":0.07911426711290512,"control_ret_matched":0.0669897592340973,"raw_diff":0.011624970777079358},{"from":"2021-06-30","to":"2021-09-30","n_stocks":2742,"diff":0.01970418350431602,"n_treated":275,"n_treated_matched":275,"n_control":2467,"treated_ret":0.0019365852979513038,"control_ret_matched":-0.017767598206364716,"raw_diff":0.03325225037121669},{"from":"2021-09-30","to":"2021-12-31","n_stocks":2809,"diff":-0.010821020897612254,"n_treated":281,"n_treated_matched":281,"n_control":2528,"treated_ret":0.061242645631744856,"control_ret_matched":0.07206366652935711,"raw_diff":0.05202941570522534},{"from":"2021-12-31","to":"2022-03-31","n_stocks":2892,"diff":0.02289473683228184,"n_treated":290,"n_treated_matched":290,"n_control":2602,"treated_ret":-0.039972215052488026,"control_ret_matched":-0.06286695188476987,"raw_diff":0.012212207413864362},{"from":"2022-03-31","to":"2022-06-30","n_stocks":2994,"diff":0.02838715167307385,"n_treated":300,"n_treated_matched":300,"n_control":2694,"treated_ret":-0.142069420780871,"control_ret_matched":-0.17045657245394485,"raw_diff":0.02932965983966765},{"from":"2022-06-30","to":"2022-09-30","n_stocks":3016,"diff":0.008063520234100143,"n_treated":302,"n_treated_matched":302,"n_control":2714,"treated_ret":-0.03237940834454318,"control_ret_matched":-0.04044292857864332,"raw_diff":0.00421861572529799},{"from":"2022-09-30","to":"2022-12-31","n_stocks":3099,"diff":0.0029941188020449283,"n_treated":310,"n_treated_matched":310,"n_control":2789,"treated_ret":0.09775965354789411,"control_ret_matched":0.09476553474584917,"raw_diff":0.008033303320729213},{"from":"2022-12-31","to":"2023-03-31","n_stocks":3184,"diff":0.002509634768914552,"n_treated":319,"n_treated_matched":319,"n_control":2865,"treated_ret":0.0504118495120825,"control_ret_matched":0.04790221474316795,"raw_diff":-0.0057068912160256335},{"from":"2023-03-31","to":"2023-06-30","n_stocks":3226,"diff":0.01342644483081044,"n_treated":323,"n_treated_matched":323,"n_control":2903,"treated_ret":0.05693376155857001,"control_ret_matched":0.043507316727759565,"raw_diff":0.0009934777479077422},{"from":"2023-06-30","to":"2023-09-30","n_stocks":3229,"diff":0.010677650829674746,"n_treated":323,"n_treated_matched":323,"n_control":2906,"treated_ret":-0.035473310138220096,"control_ret_matched":-0.04615096096789484,"raw_diff":0.007547095071948173},{"from":"2023-09-30","to":"2023-12-31","n_stocks":3202,"diff":0.024775009610325006,"n_treated":321,"n_treated_matched":321,"n_control":2881,"treated_ret":0.13893409415082789,"control_ret_matched":0.11415908454050289,"raw_diff":0.000577999980228866},{"from":"2023-12-31","to":"2024-03-31","n_stocks":3294,"diff":0.04799607550893606,"n_treated":330,"n_treated_matched":330,"n_control":2964,"treated_ret":0.10755205442119257,"control_ret_matched":0.059555978912256516,"raw_diff":0.045968439808457856},{"from":"2024-03-31","to":"2024-06-30","n_stocks":3347,"diff":0.03344504630541703,"n_treated":335,"n_treated_matched":335,"n_control":3012,"treated_ret":-0.004148623733923493,"control_ret_matched":-0.03759367003934053,"raw_diff":0.032603232080218314},{"from":"2024-06-30","to":"2024-09-30","n_stocks":3374,"diff":-0.006219919244565986,"n_treated":338,"n_treated_matched":338,"n_control":3036,"treated_ret":0.0836738805439365,"control_ret_matched":0.08989379978850248,"raw_diff":-0.016238979301282347},{"from":"2024-09-30","to":"2024-12-31","n_stocks":3487,"diff":0.0452780907472469,"n_treated":349,"n_treated_matched":349,"n_control":3138,"treated_ret":0.02852782767073242,"control_ret_matched":-0.016750263076514484,"raw_diff":-0.02778037919237311},{"from":"2024-12-31","to":"2025-03-31","n_stocks":3584,"diff":0.021688614342767167,"n_treated":359,"n_treated_matched":359,"n_control":3225,"treated_ret":-0.018370654941730808,"control_ret_matched":-0.040059269284497975,"raw_diff":0.059607352503860025},{"from":"2025-03-31","to":"2025-06-30","n_stocks":3609,"diff":0.023859552439105376,"n_treated":361,"n_treated_matched":361,"n_control":3248,"treated_ret":0.10588945495160607,"control_ret_matched":0.0820299025125007,"raw_diff":-0.0033311817394804932},{"from":"2025-06-30","to":"2025-09-30","n_stocks":3685,"diff":0.0036321335531691924,"n_treated":369,"n_treated_matched":369,"n_control":3316,"treated_ret":0.07065080308239118,"control_ret_matched":0.06701866952922199,"raw_diff":-0.08572416424525388},{"from":"2025-09-30","to":"2025-12-31","n_stocks":3850,"diff":0.0006446399979882754,"n_treated":385,"n_treated_matched":385,"n_control":3465,"treated_ret":0.016360707594712257,"control_ret_matched":0.015716067596723983,"raw_diff":-0.002905258231179004},{"from":"2025-12-31","to":"2026-03-31","n_stocks":3986,"diff":-0.03914869996661723,"n_treated":399,"n_treated_matched":399,"n_control":3587,"treated_ret":-0.022502972061260288,"control_ret_matched":0.016645727905356945,"raw_diff":-0.022983876282664056},{"from":"2026-03-31","to":"2026-06-30","n_stocks":4029,"diff":0.037595188113661214,"n_treated":403,"n_treated_matched":403,"n_control":3626,"treated_ret":0.16833473839547636,"control_ret_matched":0.13073955028181514,"raw_diff":0.0022706560935848163}]},"public":{"holdings":"public holdings (45+ days old)","reps":2000,"seed":0,"h1":{"summary":{"events":6,"avg_diff":-0.0024541300223253717,"ci_low":-0.010308486728800564,"ci_high":0.005571667348603769,"share_of_boot_below_zero":0.727,"events_negative":4},"per_event":[{"event":"COVID crash","formation":"2019-12-31","start":"2020-02-19","end":"2020-03-23","n_stocks":2259,"status":"ok","diff":0.006212331865534708,"n_treated":226,"n_treated_matched":226,"n_control":2033,"treated_ret":-0.3905191927864426,"control_ret_matched":-0.3967315246519773,"raw_diff":0.017922874391998467,"ci_low":-0.017646830116048878,"ci_high":0.028340661684362528,"regression_coef":0.008523479208146076},{"event":"Degrossing, GameStop week","formation":"2020-09-30","start":"2021-01-22","end":"2021-01-29","n_stocks":2308,"status":"ok","diff":-0.003773271029575437,"n_treated":231,"n_treated_matched":231,"n_control":2077,"treated_ret":-0.04170255686507942,"control_ret_matched":-0.037929285835503986,"raw_diff":-0.005899819613155069,"ci_low":-0.009873513580767353,"ci_high":0.002010614119348381,"regression_coef":-0.001710374204288118},{"event":"2022 rate shock","formation":"2021-09-30","start":"2022-01-03","end":"2022-06-16","n_stocks":2809,"status":"ok","diff":-0.004855563424127624,"n_treated":281,"n_treated_matched":281,"n_control":2528,"treated_ret":-0.23047974298627152,"control_ret_matched":-0.2256241795621439,"raw_diff":-0.0018322011032075869,"ci_low":-0.043295531170818136,"ci_high":0.03252469435728548,"regression_coef":0.009214756391170744},{"event":"Yen carry unwind","formation":"2024-03-31","start":"2024-07-16","end":"2024-08-05","n_stocks":3347,"status":"ok","diff":-0.003351499722373545,"n_treated":335,"n_treated_matched":335,"n_control":3012,"treated_ret":-0.06906074039076775,"control_ret_matched":-0.0657092406683942,"raw_diff":0.02667307824326902,"ci_low":-0.015462715864905456,"ci_high":0.009041699743310825,"regression_coef":-0.006058430606772587},{"event":"Tariff shock","formation":"2024-12-31","start":"2025-04-02","end":"2025-04-08","n_stocks":3584,"status":"ok","diff":0.0015528873831648418,"n_treated":359,"n_treated_matched":359,"n_control":3225,"treated_ret":-0.1345360714443326,"control_ret_matched":-0.13608895882749744,"raw_diff":0.005995471370138061,"ci_low":-0.005681741906348591,"ci_high":0.008972094555503385,"regression_coef":0.0017343623995531446},{"event":"Multi-manager drawdown","formation":"2025-12-31","start":"2026-02-27","end":"2026-03-31","n_stocks":3986,"status":"ok","diff":-0.010509665206575175,"n_treated":399,"n_treated_matched":399,"n_control":3587,"treated_ret":-0.06011392659916487,"control_ret_matched":-0.049604261392589694,"raw_diff":-0.01208228332015638,"ci_low":-0.02232268995648677,"ci_high":0.0007236503374420573,"regression_coef":-0.013370388859531778}]},"h2":{"summary":{"events":6,"avg_diff":0.0057681293288378,"ci_low":-0.0026738758264269347,"ci_high":0.014133849218863782,"share_of_boot_below_zero":0.095,"events_negative":1},"per_event":[{"event":"COVID crash","formation":"2019-12-31","start":"2020-02-19","end":"2020-03-23","n_stocks":2259,"status":"ok","diff":0.014292552268657336,"n_treated":123,"n_treated_matched":123,"n_control":2136,"treated_ret":-0.3913265743208026,"control_ret_matched":-0.4056191265894599,"raw_diff":0.016204741925474497,"ci_low":-0.010974807513210203,"ci_high":0.03986950868642865,"regression_coef":0.011975576599402264},{"event":"Degrossing, GameStop week","formation":"2020-09-30","start":"2021-01-22","end":"2021-01-29","n_stocks":2308,"status":"ok","diff":0.0005333412669368643,"n_treated":148,"n_treated_matched":148,"n_control":2160,"treated_ret":-0.040006543353821034,"control_ret_matched":-0.040539884620757895,"raw_diff":-0.0038608917372864524,"ci_low":-0.00767586610976116,"ci_high":0.008361714318364754,"regression_coef":0.0010584071964778404},{"event":"2022 rate shock","formation":"2021-09-30","start":"2022-01-03","end":"2022-06-16","n_stocks":2809,"status":"ok","diff":-0.003409155481781655,"n_treated":147,"n_treated_matched":147,"n_control":2657,"treated_ret":-0.23210436057441855,"control_ret_matched":-0.22869520509263688,"raw_diff":-0.00339198739597088,"ci_low":-0.042143928966476035,"ci_high":0.03605431025053847,"regression_coef":-0.007376023440016352},{"event":"Yen carry unwind","formation":"2024-03-31","start":"2024-07-16","end":"2024-08-05","n_stocks":3347,"status":"ok","diff":0.009504497862052813,"n_treated":200,"n_treated_matched":200,"n_control":3143,"treated_ret":-0.057101193771882934,"control_ret_matched":-0.06660569163393575,"raw_diff":0.03834649238230043,"ci_low":-0.002086172833275633,"ci_high":0.02078509144987787,"regression_coef":0.010824962447773182},{"event":"Tariff shock","formation":"2024-12-31","start":"2025-04-02","end":"2025-04-08","n_stocks":3584,"status":"ok","diff":0.00878959695739567,"n_treated":237,"n_treated_matched":237,"n_control":3346,"treated_ret":-0.12952058004179642,"control_ret_matched":-0.1383101769991921,"raw_diff":0.011182146123264736,"ci_low":0.0008735032459624088,"ci_high":0.01616803065082391,"regression_coef":0.005033664992472788},{"event":"Multi-manager drawdown","formation":"2025-12-31","start":"2026-02-27","end":"2026-03-31","n_stocks":3986,"status":"ok","diff":0.00489794309976577,"n_treated":264,"n_treated_matched":264,"n_control":3713,"treated_ret":-0.049516092357898285,"control_ret_matched":-0.05441403545766406,"raw_diff":-0.00027828728055310364,"ci_low":-0.007504447620338584,"ci_high":0.016876760428942938,"regression_coef":-0.0008575565756264643}]},"ordinary_quarters":[{"from":"2019-03-31","to":"2019-06-30","n_stocks":2120,"diff":-0.014257975651683701,"n_treated":212,"n_treated_matched":212,"n_control":1908,"treated_ret":0.034227648148921666,"control_ret_matched":0.048485623800605365,"raw_diff":0.003931166980849377},{"from":"2019-06-30","to":"2019-09-30","n_stocks":2149,"diff":-0.0071122314225624435,"n_treated":215,"n_treated_matched":215,"n_control":1934,"treated_ret":-0.007015846361533012,"control_ret_matched":9.638506102943156e-05,"raw_diff":0.00836535018847491},{"from":"2019-09-30","to":"2019-12-31","n_stocks":2172,"diff":0.019961917893155396,"n_treated":218,"n_treated_matched":218,"n_control":1954,"treated_ret":0.10272525126671798,"control_ret_matched":0.08276333337356259,"raw_diff":0.00414873304585521},{"from":"2019-12-31","to":"2020-03-31","n_stocks":2259,"diff":0.028389657646409133,"n_treated":226,"n_treated_matched":226,"n_control":2033,"treated_ret":-0.24030583201820713,"control_ret_matched":-0.26869548966461626,"raw_diff":0.06656546657485723},{"from":"2020-03-31","to":"2020-06-30","n_stocks":2297,"diff":0.0411964224294878,"n_treated":230,"n_treated_matched":230,"n_control":2067,"treated_ret":0.26752167450400316,"control_ret_matched":0.22632525207451537,"raw_diff":-0.06232729238315854},{"from":"2020-06-30","to":"2020-09-30","n_stocks":2310,"diff":0.03237122127075329,"n_treated":231,"n_treated_matched":231,"n_control":2079,"treated_ret":0.10727703300542406,"control_ret_matched":0.07490581173467076,"raw_diff":0.042035159862630164},{"from":"2020-09-30","to":"2020-12-31","n_stocks":2308,"diff":0.0039044114944006354,"n_treated":231,"n_treated_matched":231,"n_control":2077,"treated_ret":0.18891210022387186,"control_ret_matched":0.18500768872947124,"raw_diff":-0.13546105813716228},{"from":"2020-12-31","to":"2021-03-31","n_stocks":2483,"diff":0.0065780012711423325,"n_treated":249,"n_treated_matched":249,"n_control":2234,"treated_ret":0.08952569518365697,"control_ret_matched":0.08294769391251464,"raw_diff":-0.10305994170950578},{"from":"2021-03-31","to":"2021-06-30","n_stocks":2632,"diff":0.012124507878807814,"n_treated":264,"n_treated_matched":264,"n_control":2368,"treated_ret":0.07911426711290512,"control_ret_matched":0.0669897592340973,"raw_diff":0.011624970777079358},{"from":"2021-06-30","to":"2021-09-30","n_stocks":2742,"diff":0.01970418350431602,"n_treated":275,"n_treated_matched":275,"n_control":2467,"treated_ret":0.0019365852979513038,"control_ret_matched":-0.017767598206364716,"raw_diff":0.03325225037121669},{"from":"2021-09-30","to":"2021-12-31","n_stocks":2809,"diff":-0.010821020897612254,"n_treated":281,"n_treated_matched":281,"n_control":2528,"treated_ret":0.061242645631744856,"control_ret_matched":0.07206366652935711,"raw_diff":0.05202941570522534},{"from":"2021-12-31","to":"2022-03-31","n_stocks":2892,"diff":0.02289473683228184,"n_treated":290,"n_treated_matched":290,"n_control":2602,"treated_ret":-0.039972215052488026,"control_ret_matched":-0.06286695188476987,"raw_diff":0.012212207413864362},{"from":"2022-03-31","to":"2022-06-30","n_stocks":2994,"diff":0.02838715167307385,"n_treated":300,"n_treated_matched":300,"n_control":2694,"treated_ret":-0.142069420780871,"control_ret_matched":-0.17045657245394485,"raw_diff":0.02932965983966765},{"from":"2022-06-30","to":"2022-09-30","n_stocks":3016,"diff":0.008063520234100143,"n_treated":302,"n_treated_matched":302,"n_control":2714,"treated_ret":-0.03237940834454318,"control_ret_matched":-0.04044292857864332,"raw_diff":0.00421861572529799},{"from":"2022-09-30","to":"2022-12-31","n_stocks":3099,"diff":0.0029941188020449283,"n_treated":310,"n_treated_matched":310,"n_control":2789,"treated_ret":0.09775965354789411,"control_ret_matched":0.09476553474584917,"raw_diff":0.008033303320729213},{"from":"2022-12-31","to":"2023-03-31","n_stocks":3184,"diff":0.002509634768914552,"n_treated":319,"n_treated_matched":319,"n_control":2865,"treated_ret":0.0504118495120825,"control_ret_matched":0.04790221474316795,"raw_diff":-0.0057068912160256335},{"from":"2023-03-31","to":"2023-06-30","n_stocks":3226,"diff":0.01342644483081044,"n_treated":323,"n_treated_matched":323,"n_control":2903,"treated_ret":0.05693376155857001,"control_ret_matched":0.043507316727759565,"raw_diff":0.0009934777479077422},{"from":"2023-06-30","to":"2023-09-30","n_stocks":3229,"diff":0.010677650829674746,"n_treated":323,"n_treated_matched":323,"n_control":2906,"treated_ret":-0.035473310138220096,"control_ret_matched":-0.04615096096789484,"raw_diff":0.007547095071948173},{"from":"2023-09-30","to":"2023-12-31","n_stocks":3202,"diff":0.024775009610325006,"n_treated":321,"n_treated_matched":321,"n_control":2881,"treated_ret":0.13893409415082789,"control_ret_matched":0.11415908454050289,"raw_diff":0.000577999980228866},{"from":"2023-12-31","to":"2024-03-31","n_stocks":3294,"diff":0.04799607550893606,"n_treated":330,"n_treated_matched":330,"n_control":2964,"treated_ret":0.10755205442119257,"control_ret_matched":0.059555978912256516,"raw_diff":0.045968439808457856},{"from":"2024-03-31","to":"2024-06-30","n_stocks":3347,"diff":0.03344504630541703,"n_treated":335,"n_treated_matched":335,"n_control":3012,"treated_ret":-0.004148623733923493,"control_ret_matched":-0.03759367003934053,"raw_diff":0.032603232080218314},{"from":"2024-06-30","to":"2024-09-30","n_stocks":3374,"diff":-0.006219919244565986,"n_treated":338,"n_treated_matched":338,"n_control":3036,"treated_ret":0.0836738805439365,"control_ret_matched":0.08989379978850248,"raw_diff":-0.016238979301282347},{"from":"2024-09-30","to":"2024-12-31","n_stocks":3487,"diff":0.0452780907472469,"n_treated":349,"n_treated_matched":349,"n_control":3138,"treated_ret":0.02852782767073242,"control_ret_matched":-0.016750263076514484,"raw_diff":-0.02778037919237311},{"from":"2024-12-31","to":"2025-03-31","n_stocks":3584,"diff":0.021688614342767167,"n_treated":359,"n_treated_matched":359,"n_control":3225,"treated_ret":-0.018370654941730808,"control_ret_matched":-0.040059269284497975,"raw_diff":0.059607352503860025},{"from":"2025-03-31","to":"2025-06-30","n_stocks":3609,"diff":0.023859552439105376,"n_treated":361,"n_treated_matched":361,"n_control":3248,"treated_ret":0.10588945495160607,"control_ret_matched":0.0820299025125007,"raw_diff":-0.0033311817394804932},{"from":"2025-06-30","to":"2025-09-30","n_stocks":3685,"diff":0.0036321335531691924,"n_treated":369,"n_treated_matched":369,"n_control":3316,"treated_ret":0.07065080308239118,"control_ret_matched":0.06701866952922199,"raw_diff":-0.08572416424525388},{"from":"2025-09-30","to":"2025-12-31","n_stocks":3850,"diff":0.0006446399979882754,"n_treated":385,"n_treated_matched":385,"n_control":3465,"treated_ret":0.016360707594712257,"control_ret_matched":0.015716067596723983,"raw_diff":-0.002905258231179004},{"from":"2025-12-31","to":"2026-03-31","n_stocks":3986,"diff":-0.03914869996661723,"n_treated":399,"n_treated_matched":399,"n_control":3587,"treated_ret":-0.022502972061260288,"control_ret_matched":0.016645727905356945,"raw_diff":-0.022983876282664056},{"from":"2026-03-31","to":"2026-06-30","n_stocks":4029,"diff":0.037595188113661214,"n_treated":403,"n_treated_matched":403,"n_control":3626,"treated_ret":0.16833473839547636,"control_ret_matched":0.13073955028181514,"raw_diff":0.0022706560935848163}]}},"events":[{"name":"COVID crash","start":"2020-02-19","end":"2020-03-23"},{"name":"Degrossing, GameStop week","start":"2021-01-22","end":"2021-01-29"},{"name":"2022 rate shock","start":"2022-01-03","end":"2022-06-16"},{"name":"Yen carry unwind","start":"2024-07-16","end":"2024-08-05"},{"name":"Tariff shock","start":"2025-04-02","end":"2025-04-08"},{"name":"Multi-manager drawdown","start":"2026-02-27","end":"2026-03-31"}]};
+// Sentry Ward dashboard. Inlined into one self-contained HTML file by dashboard.py;
+// DATA is defined just before this script runs.
+// ---------------------------------------------------------------- helpers
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null) continue;
+    if (k === "class") e.className = v; else if (k === "style") e.style.cssText = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v);
+  }
+  for (const c of kids.flat()) if (c != null) e.append(c instanceof Node ? c : String(c));
+  return e;
+}
+const SVGNS = "http://www.w3.org/2000/svg";
+function sv(tag, attrs, text) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
+  if (text != null) e.textContent = text;
+  return e;
+}
+const C = { orange: "#d97706", orangeHi: "#f59e0b", up: "#16a34a", down: "#dc2626", cyan: "#0891b2", fg: "#e5e5e5", dim: "#8a8a8a", faint: "#5c5c5c", grid: "#525252", line: "#1a1a1a" };
+const isNum = v => typeof v === "number" && isFinite(v);
+const pct = (v, d = 1, sign = false) => isNum(v) ? (sign && v > 0 ? "+" : "") + (100 * v).toFixed(d) + "%" : "--";
+const num = (v, d = 1) => isNum(v) ? v.toFixed(d) : "--";
+const bn = v => isNum(v) ? "$" + (v / 1e9).toFixed(v >= 1e10 ? 1 : 2) + "B" : "--";
+const money = v => !isNum(v) ? "--" : v >= 1e9 ? "$" + (v / 1e9).toFixed(1) + "B" : "$" + (v / 1e6).toFixed(0) + "M";
+const quarter = p => { const [y, m] = p.split("-").map(Number); return `Q${Math.ceil(m / 3)} ${y}`; };
+function bar(v, max, color, label) {
+  const w = isNum(v) ? Math.max(0, Math.min(100, 100 * v / max)) : 0;
+  return el("div", { class: "bar" }, el("div", { class: "t" }, el("div", { class: "f", style: `width:${w}%;background:${color}` })),
+    el("span", {}, label != null ? label : (isNum(v) ? v.toFixed(0) : "--")));
+}
+function table(id, head, rows) {
+  document.getElementById(id).replaceChildren(
+    el("thead", {}, el("tr", {}, head.map(([label, cls]) => el("th", { class: cls || null, scope: "col" }, label)))),
+    el("tbody", {}, rows.length ? rows : [el("tr", {}, el("td", { class: "l dim", colspan: head.length }, "No data"))]));
+}
+function seg(id, options, current, onPick) {
+  const box = document.getElementById(id);
+  const draw = sel => {
+    box.querySelectorAll("button").forEach(b => b.remove());
+    for (const [val, label] of options)
+      box.append(el("button", { type: "button", "aria-pressed": String(val === sel), onclick: () => { draw(val); onPick(val); } }, label));
+  };
+  draw(current);
+}
+// More crowded than last quarter is the risk direction: red. Less crowded: green.
+const changeCell = v => el("td", { class: isNum(v) ? (v > 0 ? "down" : "up") : "dim" },
+  isNum(v) ? (v > 0 ? "▲ +" : "▼ ") + v.toFixed(1) : "NEW");
+
+// ---------------------------------------------------------------- screens (hash routing)
+const SCREENS = ["dashboard", "crowded", "overlap", "stress", "unwind", "funds", "about"];
+function show() {
+  const name = SCREENS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "dashboard";
+  document.querySelectorAll(".screen").forEach(s => { s.hidden = s.dataset.screen !== name; });
+  document.querySelectorAll(".tabs a").forEach(a => { if (a.getAttribute("href") === "#" + name) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
+}
+window.addEventListener("hashchange", show);
+show();
+
+// ---------------------------------------------------------------- menu bar, status bar, KPIs
+const idx = DATA.index, last = idx[idx.length - 1] || {};
+const hardSet = new Set(DATA.hard_exit.map(r => r.ticker));
+document.getElementById("mbLive").textContent = `DATA ${quarter(DATA.period)}`;
+document.getElementById("mbBuilt").textContent = `BUILT ${DATA.generated}`;
+document.getElementById("mbFunds").textContent = `${DATA.n_funds} FUNDS`;
+document.getElementById("stPeriod").textContent = `QUARTER ENDING ${DATA.period}` + (DATA.missing_funds.length ? ` · NO FILING: ${DATA.missing_funds.join(", ")}` : "");
+document.getElementById("crowdNote").textContent = `${quarter(DATA.period)} · ETFs excluded · top ${DATA.stocks.length}`;
+if (DATA.coverage) document.getElementById("aboutCov").textContent =
+  `Latest quarter: ${pct(DATA.coverage.value_priced_share)} of the funds' stock value has usable prices, ${pct(DATA.coverage.value_with_shares_share)} also has shares outstanding.`;
+
+function kpi(label, value, unit, detail, detailClass, valueColor) {
+  return el("div", { class: "kpi" }, el("div", { class: "l" }, label),
+    el("div", { class: "v", style: valueColor ? `color:${valueColor}` : null }, value, unit ? el("small", {}, unit) : null),
+    el("div", { class: "d " + (detailClass || "") }, detail));
+}
+const chg = v => isNum(v) ? `${v > 0 ? "▲ +" : "▼ "}${(100 * v).toFixed(2)} pts QoQ · same funds` : "first quarter";
+const chgCls = v => isNum(v) ? (v > 0 ? "down" : "up") : "";
+const h1 = DATA.stress.primary && DATA.stress.primary.h1 ? DATA.stress.primary.h1.summary : null;
+const topStock = DATA.stocks[0];
+document.getElementById("kpis").append(
+  kpi("RAW CROWDING INDEX", num(last.raw, 3), null, chg(last.raw_change), chgCls(last.raw_change)),
+  kpi("ACTIVE CROWDING INDEX", num(last.active, 3), null, chg(last.active_change), chgCls(last.active_change)),
+  kpi("MOST CROWDED", topStock ? topStock.ticker : "--", topStock ? `${num(topStock.score, 0)}` : null,
+      topStock ? `${topStock.holders} of ${topStock.n_funds} funds hold it` : ""),
+  kpi("PRICE COVERAGE", DATA.coverage ? pct(DATA.coverage.value_priced_share) : "--", null,
+      DATA.coverage ? `of fund stock value · ${pct(DATA.coverage.value_with_shares_share, 0)} with shares out.` : "run ward market"),
+  kpi("STRESS TEST H1", h1 ? pct(h1.avg_diff, 1, true) : "--", null,
+      h1 ? `${h1.ci_high < 0 ? "SUPPORTED" : "NOT SUPPORTED"} · [${pct(h1.ci_low, 1, true)}, ${pct(h1.ci_high, 1, true)}]` : "run ward stress",
+      h1 ? (h1.ci_high < 0 ? "down" : "dim") : "", h1 ? (h1.ci_high < 0 ? C.down : C.fg) : null),
+);
+
+// ---------------------------------------------------------------- crowding map
+function tileColor(r) {
+  if (!isNum(r)) return ["#161616", C.fg];
+  if (r >= 66) return ["#4c0e0e", "#fca5a5"];
+  if (r >= 33) return ["#4a3206", "#fcd34d"];
+  return ["#0b3d1c", "#86efac"];
+}
+document.getElementById("tiles").replaceChildren(...DATA.stocks.slice(0, 12).map(s => {
+  const [bg, fg] = tileColor(s.exit_risk);
+  return el("div", { class: "tile", style: `background:${bg};color:${fg};${hardSet.has(s.ticker) ? "border-color:" + C.orangeHi : ""}`,
+                     title: `${s.issuer}: crowding ${num(s.score, 0)}, exit risk ${num(s.exit_risk, 0)}, ${num(s.dte)} days to exit` },
+    el("b", {}, s.ticker), el("span", {}, `${num(s.score, 0)} · ${isNum(s.dte) ? num(s.dte) + "d" : "--"}`));
+}));
+
+// ---------------------------------------------------------------- index chart
+function lineChart(host, key, label, color) {
+  const pts = idx.filter(r => isNum(r[key]));
+  const W = 900, H = 260, L = 58, R = 18, T = 14, B = 28;
+  const svg = sv("svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", role: "img", "aria-label": `${label} by quarter` });
+  if (pts.length < 2) { host.replaceChildren(svg); return; }
+  const t0 = Date.parse(pts[0].period), t1 = Date.parse(pts[pts.length - 1].period);
+  const ys = pts.map(p => p[key]);
+  let lo = Math.min(...ys), hi = Math.max(...ys); const pad = (hi - lo) * 0.15 || 0.01; lo -= pad; hi += pad;
+  const x = t => L + (W - L - R) * (t - t0) / (t1 - t0), y = v => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+  for (let k = 0; k <= 4; k++) {
+    const v = lo + (hi - lo) * k / 4, yy = y(v);
+    svg.append(sv("line", { x1: L, x2: W - R, y1: yy, y2: yy, stroke: C.grid, "stroke-opacity": 0.35, "stroke-dasharray": "2 4" }));
+    svg.append(sv("text", { x: L - 8, y: yy + 4, fill: C.dim, "font-size": 11, "text-anchor": "end" }, v.toFixed(3)));
+  }
+  for (const ev of DATA.events) {
+    const t = Date.parse(ev.start); if (t < t0 || t > t1) continue;
+    const xx = x(t);
+    svg.append(sv("line", { x1: xx, x2: xx, y1: T, y2: H - B, stroke: C.down, "stroke-opacity": 0.5, "stroke-dasharray": "3 3" }));
+    svg.append(sv("text", { x: xx + 3, y: T + 10, fill: C.down, "fill-opacity": 0.8, "font-size": 10 }, ev.name.split(",")[0].toUpperCase()));
+  }
+  let lastYear = null;
+  for (const p of pts) {
+    const yr = p.period.slice(0, 4);
+    if (yr !== lastYear) { lastYear = yr; svg.append(sv("text", { x: x(Date.parse(p.period)), y: H - 8, fill: C.dim, "font-size": 11, "text-anchor": "middle" }, yr)); }
+  }
+  const d = pts.map((p, i) => `${i ? "L" : "M"}${x(Date.parse(p.period)).toFixed(1)},${y(p[key]).toFixed(1)}`).join("");
+  svg.append(sv("path", { d: `${d}L${x(t1).toFixed(1)},${H - B}L${L},${H - B}Z`, fill: color, "fill-opacity": 0.1 }));
+  svg.append(sv("path", { d, fill: "none", stroke: color, "stroke-width": 2 }));
+  const lp = pts[pts.length - 1];
+  svg.append(sv("circle", { cx: x(t1), cy: y(lp[key]), r: 4, fill: color }));
+  svg.append(sv("text", { x: x(t1) - 8, y: y(lp[key]) - 10, fill: color, "font-size": 12, "font-weight": 700, "text-anchor": "end" }, lp[key].toFixed(3)));
+  host.replaceChildren(svg);
+}
+const IDX = { raw: ["raw", "RAW INDEX", C.orangeHi, "Raw: average share of portfolios two funds have in common."],
+              active: ["active", "ACTIVE INDEX", C.cyan, "Active: average share of the bets beyond the market that two funds have in common."] };
+function drawIdx(which) {
+  const [key, label, color, text] = IDX[which];
+  lineChart(document.getElementById("chIdx"), key, label, color);
+  const ch = idx.filter(p => isNum(p[which + "_change"]));
+  const total = ch.reduce((s, p) => s + p[which + "_change"], 0);
+  document.getElementById("idxNote").textContent = `${text} Over ${ch.length} quarter-to-quarter changes measured on the same fund pairs, it moved ${(100 * total).toFixed(1)} points in total. Red dashed lines: stress test events.`;
+}
+seg("segIdx", [["raw", "RAW"], ["active", "ACTIVE"]], "raw", drawIdx);
+drawIdx("raw");
+
+// ---------------------------------------------------------------- hard exit, pairs
+table("tExit", [["SYMBOL", "l"], ["FUNDS"], ["OWN"], ["EXIT DAYS"], ["RISK"]],
+  DATA.hard_exit.map(s => el("tr", {},
+    el("td", { class: "l tk", title: s.issuer }, s.ticker), el("td", {}, s.holders), el("td", {}, pct(s.own, 1)),
+    el("td", { class: "down" }, num(s.dte)), el("td", {}, num(s.exit_risk, 0)))));
+const pairRows = n => DATA.pairs.slice(0, n).map(p => el("tr", {},
+  el("td", { class: "l" }, `${p.fund_a} · ${p.fund_b}`), el("td", { class: "tk" }, num(p.active_overlap, 3)),
+  el("td", {}, num(p.raw_overlap, 3)), el("td", { class: "dim" }, p.shared_stocks)));
+table("tPairsMini", [["PAIR", "l"], ["ACTIVE"], ["RAW"], ["STOCKS"]], pairRows(6));
+table("tPairs", [["PAIR", "l"], ["ACTIVE"], ["RAW"], ["STOCKS"]], pairRows(20));
+
+// ---------------------------------------------------------------- crowded table
+table("tStocks",
+  [["#"], ["SYMBOL", "l"], ["NAME", "l"], ["FUNDS"], ["OWN"], ["EXIT DAYS"], ["EXIT RISK", "l"], ["SCORE", "l"], ["Δ QoQ"]],
+  DATA.stocks.map(s => el("tr", {},
+    el("td", { class: "dim" }, s.rank),
+    el("td", { class: "l tk" }, s.ticker, hardSet.has(s.ticker) ? el("span", { class: "chip down" }, "HARD EXIT") : null),
+    el("td", { class: "l nm", title: s.issuer }, s.issuer),
+    el("td", {}, `${s.holders}/${s.n_funds}`), el("td", {}, pct(s.own, 2)),
+    el("td", { class: isNum(s.dte) && s.dte >= 15 ? "down" : null }, num(s.dte)),
+    el("td", { class: "l" }, bar(s.exit_risk, 100, C.down)),
+    el("td", { class: "l" }, bar(s.score, 100, C.orange)),
+    changeCell(s.change))));
+
+// ---------------------------------------------------------------- overlap matrix
+const styleOf = Object.fromEntries(DATA.funds.map(f => [f.fund, f.style || ""]));
+const STYLE_ORDER = ["multi-manager", "quant", "macro", "tiger-cub", "fundamental", "activist"];
+const abbr = n => n.replace(/[^A-Za-z0-9]/g, "").slice(0, 5).toUpperCase();
+function drawHeat(which) {
+  const m = which === "active" ? DATA.active_overlap : DATA.overlap;
+  const order = m.funds.map((f, i) => [f, i]).sort((a, b) =>
+    (STYLE_ORDER.indexOf(styleOf[a[0]]) - STYLE_ORDER.indexOf(styleOf[b[0]])) || a[0].localeCompare(b[0]));
+  const vals = m.values.flat().filter(v => isNum(v) && v < 0.9999);
+  const max = Math.max(0.05, ...vals);
+  const heat = document.getElementById("heat");
+  heat.style.gridTemplateColumns = `124px repeat(${order.length}, minmax(32px, 1fr))`;
+  heat.style.minWidth = `${124 + 34 * order.length}px`;
+  const cells = [el("div", {})];
+  for (const [f] of order) cells.push(el("div", { class: "cl", title: f }, abbr(f)));
+  for (const [fa, i] of order) {
+    cells.push(el("div", { class: "rl", title: styleOf[fa] }, fa));
+    for (const [fb, j] of order) {
+      if (i === j) { cells.push(el("div", { style: "background:#e5e5e5;color:#080808;font-weight:700" }, "1.00")); continue; }
+      const v = m.values[i][j];
+      if (!isNum(v)) { cells.push(el("div", { style: `color:${C.faint}` }, "--")); continue; }
+      const t = Math.min(v / max, 1);
+      const r = Math.round(10 + (217 - 10) * t), g = Math.round(10 + (119 - 10) * t), b = Math.round(10 + (6 - 10) * t);
+      cells.push(el("div", { title: `${fa} × ${fb}: ${v.toFixed(3)}`,
+        style: `background:rgb(${r},${g},${b});color:${t > 0.6 ? "#080808" : "#e5e5e5"};font-weight:${t > 0.6 ? 700 : 400}` }, v.toFixed(2).replace(/^0/, "")));
+    }
+  }
+  heat.replaceChildren(...cells);
+  document.getElementById("ovExplain").textContent = (which === "active"
+    ? "ACTIVE overlap: of the bets each fund makes beyond the combined 13F market, the share that is the same bet. Removes overlap that comes only from both funds holding the big index names."
+    : "RAW overlap: the share of two portfolios that is identical. Large diversified funds score high partly because both resemble the market.")
+    + ` Funds grouped by style. Darkest cell = ${max.toFixed(2)}. ${quarter(DATA.period)}.`;
+}
+seg("segOv", [["active", "ACTIVE"], ["raw", "RAW"]], "active", drawHeat);
+drawHeat("active");
+
+// ---------------------------------------------------------------- stress test
+function stressChart(pe, sm, W = 1360, L = 300, R = 260) {
+  const lows = pe.map(p => p.ci_low).concat(sm.ci_low, 0), highs = pe.map(p => p.ci_high).concat(sm.ci_high, 0);
+  let lo = Math.min(...lows.filter(isNum)), hi = Math.max(...highs.filter(isNum));
+  const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+  const rowH = 34, T = 28, n = pe.length + 1, H = T + rowH * n + 28;
+  const x = v => L + (W - L - R) * (v - lo) / (hi - lo);
+  const svg = sv("svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", role: "img", style: `min-width:640px;max-width:${W}px`,
+                          "aria-label": "Crowded minus matched return in each sell-off, with 95% intervals" });
+  svg.append(sv("text", { x: x(lo) + 2, y: 14, fill: C.down, "font-size": 11 }, "◀ CROWDED FELL MORE"));
+  svg.append(sv("text", { x: x(hi) - 2, y: 14, fill: C.up, "font-size": 11, "text-anchor": "end" }, "CROWDED FELL LESS ▶"));
+  svg.append(sv("line", { x1: x(0), x2: x(0), y1: T - 4, y2: H - 24, stroke: C.grid }));
+  const step = (hi - lo) > 0.08 ? 0.02 : 0.01;
+  for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) {
+    svg.append(sv("line", { x1: x(v), x2: x(v), y1: T - 4, y2: H - 24, stroke: C.grid, "stroke-opacity": 0.25, "stroke-dasharray": "2 4" }));
+    svg.append(sv("text", { x: x(v), y: H - 8, fill: C.dim, "font-size": 10, "text-anchor": "middle" }, pct(v, 0, true)));
+  }
+  const rows = pe.map(p => ({ label: p.event, sub: `holdings ${p.formation}`, d: p.diff, lo: p.ci_low, hi: p.ci_high }))
+    .concat([{ label: `AVERAGE OF ${sm.events}`, sub: "all events", d: sm.avg_diff, lo: sm.ci_low, hi: sm.ci_high, avg: true }]);
+  rows.forEach((r, k) => {
+    const yy = T + rowH * k + rowH / 2;
+    if (r.avg) svg.append(sv("line", { x1: 0, x2: W, y1: yy - rowH / 2, y2: yy - rowH / 2, stroke: "#262626" }));
+    svg.append(sv("text", { x: 0, y: yy - 2, fill: r.avg ? C.orangeHi : C.fg, "font-size": 12, "font-weight": r.avg ? 700 : 400 }, r.label.toUpperCase()));
+    svg.append(sv("text", { x: 0, y: yy + 11, fill: C.faint, "font-size": 10 }, r.sub));
+    const col = isNum(r.hi) && r.hi < 0 ? C.down : isNum(r.lo) && r.lo > 0 ? C.up : C.dim;
+    if (isNum(r.lo) && isNum(r.hi)) {
+      svg.append(sv("line", { x1: x(r.lo), x2: x(r.hi), y1: yy, y2: yy, stroke: col, "stroke-width": 2 }));
+      for (const e of [r.lo, r.hi]) svg.append(sv("line", { x1: x(e), x2: x(e), y1: yy - 5, y2: yy + 5, stroke: col, "stroke-width": 2 }));
+    }
+    if (isNum(r.d)) svg.append(sv(r.avg ? "rect" : "circle", r.avg
+      ? { x: x(r.d) - 5, y: yy - 5, width: 10, height: 10, fill: C.orangeHi }
+      : { cx: x(r.d), cy: yy, r: 5, fill: col === C.dim ? C.fg : col }));
+    svg.append(sv("text", { x: W - R + 16, y: yy + 4, fill: r.avg ? C.orangeHi : (isNum(r.d) && r.d < 0 ? "#f87171" : "#4ade80"), "font-size": 12, "font-weight": r.avg ? 700 : 400 },
+      `${pct(r.d, 1, true)}  [${pct(r.lo, 1, true)}, ${pct(r.hi, 1, true)}]`));
+  });
+  return svg;
+}
+function verdict(test, sm) {
+  const supported = isNum(sm.ci_high) && sm.ci_high < 0;
+  const name = test === "h1" ? "H1: crowded stocks (top 10%) fall more than matched peers." : "H2: crowded and hard-to-exit stocks fall more than matched peers.";
+  return el("div", { class: "verdict" }, el("b", { class: supported ? "down" : "or" }, supported ? "SUPPORTED" : "NOT SUPPORTED"),
+    el("span", {}, `${name} Average ${pct(sm.avg_diff, 1, true)}, 95% interval ${pct(sm.ci_low, 1, true)} to ${pct(sm.ci_high, 1, true)}; crowded fell more in ${sm.events_negative} of ${sm.events} events.`));
+}
+const NO_STRESS = "No stress test results yet. Run `ward stress` and `ward stress --public`, then `ward dashboard` again.";
+let sTest = "h1", sRun = "primary";
+function drawStress() {
+  const body = document.getElementById("stressBody"), res = DATA.stress[sRun];
+  if (!res || !res[sTest]) { body.replaceChildren(el("div", { class: "note" }, NO_STRESS)); return; }
+  const { per_event: pe, summary: sm } = res[sTest];
+  body.replaceChildren(verdict(sTest, sm), el("div", { class: "scroll" }, stressChart(pe, sm)),
+    el("div", { class: "note" }, "Each line is a 95% bootstrap interval for the crowded group's return minus that of stocks with similar size and beta. Red: crowded fell significantly more. Green: significantly less. Grey: no significant difference. Events, groups and matching were committed in PREREGISTRATION.md before the test was run. Holdings: LAST QUARTER END uses the quarter end before each event; PUBLIC 45+ DAYS uses only holdings the public could have seen."));
+}
+seg("segTest", [["h1", "H1 CROWDED"], ["h2", "H2 HARD EXIT"]], sTest, v => { sTest = v; drawStress(); });
+seg("segRun", [["primary", "LAST QTR END"], ["public", "PUBLIC 45D+"]], sRun, v => { sRun = v; drawStress(); });
+drawStress();
+(() => {
+  const host = document.getElementById("stressMini"), res = DATA.stress.primary;
+  if (!res || !res.h1) { host.replaceChildren(el("div", { class: "note" }, NO_STRESS)); return; }
+  host.replaceChildren(verdict("h1", res.h1.summary), el("div", { class: "scroll" }, stressChart(res.h1.per_event, res.h1.summary, 960, 230, 230)),
+    el("div", { class: "note" }, el("a", { href: "#stress" }, "Open the STRESS screen"), " for H2 and the public-holdings run."));
+})();
+
+// ---------------------------------------------------------------- unwind simulator
+let uFrac = 0.25, uDays = 5;
+function drawUnwind() {
+  const rows = DATA.stocks.filter(s => isNum(s.adv_shares) && s.adv_shares > 0 && isNum(s.daily_vol) && isNum(s.total_shares))
+    .map(s => {
+      const sold = uFrac * s.total_shares, part = sold / uDays / s.adv_shares;
+      const move = 0.7 * s.daily_vol * Math.sqrt(sold / s.adv_shares);
+      return { s, value: isNum(s.close) ? sold * s.close : uFrac * s.value_usd, part, move };
+    }).sort((a, b) => b.move - a.move);
+  table("tUnwind", [["SYMBOL", "l"], ["NAME", "l"], ["VALUE SOLD"], ["PER DAY, % OF VOLUME"], ["EST. PRICE MOVE"], ["", "l"]],
+    rows.map(r => el("tr", {},
+      el("td", { class: "l tk" }, r.s.ticker), el("td", { class: "l nm", title: r.s.issuer }, r.s.issuer),
+      el("td", {}, money(r.value)),
+      el("td", { class: r.part > 0.2 ? "down" : null }, pct(r.part, 0)),
+      el("td", { class: r.move >= 0.025 ? "down" : null, style: "font-weight:700" }, pct(-r.move, 1)),
+      el("td", { class: "l" }, el("div", { class: "bar", style: "min-width:160px" }, el("div", { class: "t" },
+        el("div", { class: "f", style: `width:${Math.min(100, 100 * r.move / 0.08)}%;background:${r.move >= 0.025 ? C.down : C.orange}` })))))));
+}
+seg("segFrac", [[0.1, "10%"], [0.25, "25%"], [0.5, "50%"]], uFrac, v => { uFrac = v; drawUnwind(); });
+seg("segDays", [[1, "1D"], [5, "5D"], [10, "10D"]], uDays, v => { uDays = v; drawUnwind(); });
+drawUnwind();
+
+// ---------------------------------------------------------------- funds and ETFs
+table("tFunds", [["FUND", "l"], ["STYLE", "l"], ["STOCKS"], ["13F VALUE"], ["ETF SHARE"], ["ACTIVE SHARE", "l"]],
+  DATA.funds.map(f => el("tr", {},
+    el("td", { class: "l", style: "font-weight:700" }, f.fund), el("td", { class: "l dim" }, (f.style || "").toUpperCase()), el("td", {}, f.stocks),
+    el("td", {}, bn(f.value_usd)), el("td", {}, pct(f.etf_share, 0)),
+    el("td", { class: "l" }, bar(f.active_share, 1, C.orange, num(f.active_share, 2))))));
+table("tEtfs", [["NAME", "l"], ["CLASS", "l"], ["FUNDS"], ["VALUE"]],
+  DATA.etfs.map(e => el("tr", {},
+    el("td", { class: "l nm", title: e.issuer }, e.issuer), el("td", { class: "l dim" }, e.class || ""),
+    el("td", {}, e.holders), el("td", {}, bn(e.value_usd)))));
+
+</script>
+</body>
+</html>
