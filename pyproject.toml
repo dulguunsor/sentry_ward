@@ -8,6 +8,8 @@ version = "0.1.0"
 description = "Sentry Ward: reveal hidden hedge fund crowding from SEC Form 13F holdings."
 readme = "README.md"
 requires-python = ">=3.10"
+authors = [{ name = "Dulguun Enkhtsatsral" }]
+classifiers = ["License :: OSI Approved :: MIT License"]
 dependencies = [
     "duckdb>=1.0",
     "pandas>=2.0",

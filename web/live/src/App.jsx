@@ -114,9 +114,9 @@ function BasketTable({ stocks, range }) {
             <td className={signCls(s.ret)}>{pct(s.ret)}</td>
             <td className={signCls(s.peers_ret)}>{pct(s.peers_ret)}</td>
             <td className={signCls(s.rel)} style={{ fontWeight: 700 }}>{pct(s.rel)}</td>
-            <td className="l" style={{ minWidth: 56 }}>
+            <td className="l" style={{ minWidth: 40, paddingRight: 4 }}>
               {isNum(s.rel) && <span className="relbar" style={{
-                width: `${Math.round(48 * Math.abs(s.rel) / max)}px`,
+                width: `${Math.round(32 * Math.abs(s.rel) / max)}px`,
                 background: s.rel < 0 ? "var(--down)" : "var(--up)" }} />}
             </td>
           </tr>

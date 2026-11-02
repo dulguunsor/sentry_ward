@@ -8,6 +8,7 @@
 ![Stress test](https://img.shields.io/badge/stress%20test-pre--registered-16a34a)
 ![React](https://img.shields.io/badge/live%20view-React%20%2B%20Flask-61dafb)
 ![Docker](https://img.shields.io/badge/Docker-ready-2496ed)
+![License](https://img.shields.io/badge/license-MIT-16a34a)
 
 ![Sentry Ward dashboard](docs/dashboard.png)
 
@@ -90,6 +91,8 @@ ward sample && ward load && ward build && ward report
 | ABOUT | Sources, blind spots and method |
 
 ## Live view (`ward live`)
+
+![Sentry Ward live view](docs/live.png)
 
 `ward live` starts a small local server and opens the live screen in a browser. It
 needs the database built by the steps above, including `ward market`.
@@ -314,4 +317,7 @@ opening a pull request.
 
 ## License
 
-No license has been chosen yet. Until one is added, all rights are reserved.
+MIT. See [LICENSE](LICENSE).
+
+The terminal look is inspired by [Fincept Terminal](https://github.com/Fincept-Corporation/FinceptTerminal).
+No code from that project is used.
