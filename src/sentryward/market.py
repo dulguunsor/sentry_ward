@@ -35,6 +35,7 @@ SEC_FRAMES_URL = "https://data.sec.gov/api/xbrl/frames/{taxonomy}/{concept}/shar
 ADV_DAYS = 20          # average daily volume window
 VOL_DAYS = 60          # volatility window
 PRICE_MATCH = (0.8, 1.25)
+MAX_PRICE_ATTEMPTS = 3   # tickers that return no data are retried on later runs, up to this many times
 
 # Shares outstanding, in order of preference.
 SHARE_CONCEPTS = [
@@ -68,6 +69,7 @@ def _ensure_tables(con: duckdb.DuckDBPyConnection) -> None:
             symbol VARCHAR, date DATE, close DOUBLE, adj_close DOUBLE, volume DOUBLE, split DOUBLE,
             PRIMARY KEY (symbol, date));
         CREATE TABLE IF NOT EXISTS price_status (symbol VARCHAR PRIMARY KEY, n_rows INTEGER, fetched_at TIMESTAMP);
+        ALTER TABLE price_status ADD COLUMN IF NOT EXISTS attempts INTEGER DEFAULT 1;
         CREATE TABLE IF NOT EXISTS sec_tickers (cik VARCHAR, symbol VARCHAR, title VARCHAR);
         CREATE TABLE IF NOT EXISTS shares_out (
             cik VARCHAR, period DATE, shares DOUBLE, source VARCHAR, PRIMARY KEY (cik, period, source));
@@ -139,6 +141,11 @@ def map_cusips(
             if r.status_code == 429:
                 sleep(60 if not key else 7)
                 continue
+            if r.status_code in (401, 403):
+                raise RuntimeError(
+                    f"OpenFIGI rejected the API key in {OPENFIGI_KEY_ENV}. Copy the key again from "
+                    "your OpenFIGI account page, or remove the variable to run without a key."
+                )
             r.raise_for_status()
             break
         else:
@@ -158,12 +165,17 @@ def map_cusips(
 
 def yahoo_download(symbols: list[str], start: str) -> pd.DataFrame:
     """Daily close, adjusted close, volume and splits, in long format."""
+    import warnings
+
     import yfinance as yf
 
-    raw = yf.download(
-        symbols, start=start, auto_adjust=False, actions=True, group_by="ticker",
-        threads=True, progress=False,
-    )
+    with warnings.catch_warnings():
+        # yfinance triggers pandas deprecation warnings on every call; they are harmless.
+        warnings.simplefilter("ignore")
+        raw = yf.download(
+            symbols, start=start, auto_adjust=False, actions=True, group_by="ticker",
+            threads=True, progress=False,
+        )
     out = []
     if raw is None or raw.empty:
         return pd.DataFrame(columns=["symbol", "date", "close", "adj_close", "volume", "split"])
@@ -195,13 +207,20 @@ def fetch_prices(
     con: duckdb.DuckDBPyConnection,
     start: str = "2018-09-01",
     downloader: Callable[[list[str], str], pd.DataFrame] | None = None,
-    chunk: int = 100,
+    chunk: int = 50,
     refresh: bool = False,
     log: Log = print,
+    sleep: Callable[[float], None] = time.sleep,
+    pause: float = 2.0,
 ) -> dict[str, int]:
+    """Download prices for tickers not fetched yet. Tickers that came back empty
+    (delisted, or Yahoo was rate limiting) are retried on later runs, up to
+    MAX_PRICE_ATTEMPTS times. A batch that comes back completely empty is treated as
+    rate limiting: wait a minute and try it once more."""
     _ensure_tables(con)
     dl = downloader or yahoo_download
-    where = "" if refresh else "AND symbol NOT IN (SELECT symbol FROM price_status)"
+    where = "" if refresh else f"""AND symbol NOT IN (
+        SELECT symbol FROM price_status WHERE n_rows > 0 OR attempts >= {MAX_PRICE_ATTEMPTS})"""
     todo = [r[0] for r in con.execute(
         f"SELECT DISTINCT symbol FROM cusip_map WHERE symbol IS NOT NULL {where} ORDER BY symbol"
     ).fetchall()]
@@ -213,6 +232,10 @@ def fetch_prices(
     for b, i in enumerate(range(0, len(todo), chunk), start=1):
         syms = todo[i:i + chunk]
         df = dl(syms, start)
+        if not len(df) and len(syms) > 1:
+            log(f"  batch {b} came back empty, probably rate limited: waiting 60 seconds")
+            sleep(60)
+            df = dl(syms, start)
         if len(df):
             df = df.assign(split=df["split"].fillna(0.0), volume=df["volume"].fillna(0.0))
             con.register("incoming_prices", df)
@@ -226,11 +249,24 @@ def fetch_prices(
         counts = df.groupby("symbol").size().to_dict() if len(df) else {}
         with_data += sum(1 for s in syms if counts.get(s, 0) > 0)
         con.executemany(
-            "INSERT OR REPLACE INTO price_status VALUES (?, ?, now())",
+            """
+            INSERT INTO price_status VALUES (?, ?, now(), 1)
+            ON CONFLICT (symbol) DO UPDATE SET
+                n_rows = excluded.n_rows, fetched_at = excluded.fetched_at,
+                attempts = price_status.attempts + 1
+            """,
             [(s, int(counts.get(s, 0))) for s in syms],
         )
         if b % 10 == 0 or b == n_chunks:
             log(f"  {b:,}/{n_chunks:,} batches, {with_data:,} tickers with data")
+        if b < n_chunks:
+            sleep(pause)
+    missing = con.execute(
+        f"SELECT count(*) FROM price_status WHERE n_rows = 0 AND attempts < {MAX_PRICE_ATTEMPTS}"
+    ).fetchall()[0][0]
+    if missing:
+        log(f"  {missing:,} tickers returned no data; run `ward market` again later to retry them "
+            f"(up to {MAX_PRICE_ATTEMPTS} tries each; delisted stocks never return data).")
     return {"requested": len(todo), "with_data": with_data}
 
 

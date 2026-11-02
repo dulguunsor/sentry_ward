@@ -64,7 +64,10 @@ def cmd_market(args, paths):
     if not metrics._has_table(con, "fund_positions"):
         raise SystemExit("Run `ward build` first: market data is fetched for the stocks the funds hold.")
     skip = [name for name in ("figi", "prices", "shares") if getattr(args, f"skip_{name}")]
-    out = market.run_all(con, start=f"{args.since - 1}-09-01", skip=skip, refresh_prices=args.refresh_prices)
+    try:
+        out = market.run_all(con, start=f"{args.since - 1}-09-01", skip=skip, refresh_prices=args.refresh_prices)
+    except RuntimeError as e:
+        raise SystemExit(f"Error: {e}")
     m = out["market"]
     print(f"\nMarket table: {m['rows']:,} stock-quarters, {m['priced']:,} with prices, "
           f"{m['matched']:,} matching the 13F price, {m['with_shares']:,} also with shares outstanding.")

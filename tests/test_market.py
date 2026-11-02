@@ -100,7 +100,7 @@ def run_market(con):
     figi = FakeFigi()
     out = {
         "figi": market.map_cusips(con, session=figi, log=lambda m: None, sleep=lambda s: None),
-        "prices": market.fetch_prices(con, downloader=fake_yahoo, log=lambda m: None),
+        "prices": market.fetch_prices(con, downloader=fake_yahoo, log=lambda m: None, sleep=lambda s: None),
         "shares": market.fetch_shares(con, session=FakeSec(), log=lambda m: None, sleep=lambda s: None),
         "market": market.build_market(con),
     }
@@ -120,7 +120,11 @@ def test_mapping_retries_and_caches(con):
     assert rows[CUSIP["BBB"]] == "BBB-A" and rows[CUSIP["CCC"]] is None
     # Second run has nothing left to map or download.
     assert market.map_cusips(con, session=FakeFigi(), log=lambda m: None) == {"requested": 0, "found": 0}
-    assert market.fetch_prices(con, downloader=fake_yahoo, log=lambda m: None)["requested"] == 0
+    # DDD returned nothing, so later runs retry it until MAX_PRICE_ATTEMPTS.
+    quiet = dict(log=lambda m: None, sleep=lambda s: None)
+    assert market.fetch_prices(con, downloader=fake_yahoo, **quiet)["requested"] == 1
+    assert market.fetch_prices(con, downloader=fake_yahoo, **quiet)["requested"] == 1
+    assert market.fetch_prices(con, downloader=fake_yahoo, **quiet)["requested"] == 0
 
 
 def test_split_is_undone_and_windows_are_right(con):
@@ -203,3 +207,18 @@ def test_market_data_never_changes_crowding_score(con):
         "SELECT cusip, exit_risk FROM stock_crowding WHERE period = DATE '2026-06-30'"
     ).fetchall())
     assert risk[CUSIP["AAA"]] is not None and risk[CUSIP["BBB"]] is None
+
+
+def test_rate_limited_batch_is_retried(con):
+    market.map_cusips(con, session=FakeFigi(), log=lambda m: None, sleep=lambda s: None)
+    calls, waits = [], []
+
+    def flaky(symbols, start):
+        calls.append(list(symbols))
+        if len(calls) == 1:               # first call: rate limited, nothing comes back
+            return fake_yahoo([], start)
+        return fake_yahoo(symbols, start)
+
+    out = market.fetch_prices(con, downloader=flaky, log=lambda m: None, sleep=waits.append)
+    assert len(calls) == 2 and 60 in waits
+    assert out["with_data"] == 2          # AAA and BBB-A; DDD has no data

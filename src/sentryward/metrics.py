@@ -203,16 +203,17 @@ def unmatched_patterns(con: duckdb.DuckDBPyConnection, universe_csv: Path) -> li
 def build_fund_weights(con: duckdb.DuckDBPyConnection) -> None:
     # Several CIKs can share one label (a parent and an adviser). They are combined
     # into one fund so a fund is never compared with itself. Each company's largest
-    # line gives the label (CUSIP, name, class).
+    # line gives the label (CUSIP, name, class); ties go to the lowest CUSIP so the
+    # result never changes between runs.
     con.execute(
         """
         CREATE OR REPLACE TABLE fund_positions AS
         WITH pos AS (
             SELECT u.fund, h.period,
                    issuer_key(h.cusip, h.issuer)              AS issuer_id,
-                   arg_max(h.cusip, h.value_usd)              AS cusip,
-                   arg_max(clean_name(h.issuer), h.value_usd) AS issuer,
-                   arg_max(clean_name(h.title_of_class), h.value_usd) AS title_of_class,
+                   first(h.cusip ORDER BY h.value_usd DESC, h.cusip) AS cusip,
+                   first(clean_name(h.issuer) ORDER BY h.value_usd DESC, h.cusip) AS issuer,
+                   first(clean_name(h.title_of_class) ORDER BY h.value_usd DESC, h.cusip) AS title_of_class,
                    sum(h.value_usd)                           AS value_usd,
                    sum(h.shares)                              AS shares
             FROM holdings_ok h
@@ -236,8 +237,8 @@ def build_market_weights(con: duckdb.DuckDBPyConnection) -> None:
         CREATE OR REPLACE TABLE market_weights AS
         WITH allpos AS (
             SELECT period, issuer_key(cusip, issuer) AS issuer_id,
-                   arg_max(issuer, value_usd)         AS issuer,
-                   arg_max(title_of_class, value_usd) AS title_of_class,
+                   first(issuer ORDER BY value_usd DESC, cusip)         AS issuer,
+                   first(title_of_class ORDER BY value_usd DESC, cusip) AS title_of_class,
                    sum(value_usd)                     AS value_usd
             FROM holdings_ok
             GROUP BY ALL
@@ -314,8 +315,8 @@ def build_stock_crowding(con: duckdb.DuckDBPyConnection, min_holders: int = 2) -
         ),
         s AS (
             SELECT period, issuer_id,
-                   arg_max(cusip, value_usd)  AS cusip,
-                   arg_max(issuer, value_usd) AS issuer,
+                   first(cusip ORDER BY value_usd DESC, cusip)  AS cusip,
+                   first(issuer ORDER BY value_usd DESC, cusip) AS issuer,
                    count(*)             AS n_holders,
                    sum(value_usd)       AS total_value_usd,
                    sum(shares)          AS total_shares,
