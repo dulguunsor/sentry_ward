@@ -52,6 +52,8 @@ ward build --universe data/universe.csv
 ward market                    # tickers, prices, volume, shares outstanding
 ward report --period 2026-06-30
 ward stress                    # do crowded stocks fall more in sell-offs?
+ward stress --public
+ward dashboard                 # one self-contained HTML file with everything
 ```
 
 On Windows PowerShell, set variables like this instead of `export`:
@@ -198,5 +200,5 @@ sample funds have overlaps of 0.80, 0.25 and 0.25, so the crowding index must be
 - [x] Crowding scores, fund overlap, crowding index
 - [x] Market data: prices, volume, shares outstanding (CUSIP to ticker mapping)
 - [x] Stress tests: do crowded stocks fall harder in sell-offs? (pre-registered)
-- [ ] Unwind simulator
-- [ ] Dashboard
+- [x] Unwind simulator (square-root impact model, in the dashboard)
+- [x] Dashboard (`ward dashboard`)

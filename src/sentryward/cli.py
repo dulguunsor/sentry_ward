@@ -9,7 +9,7 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
-from . import clean, config, market, metrics, sec13f, stress
+from . import clean, config, dashboard, market, metrics, sec13f, stress
 
 
 def _connect(paths: config.Paths) -> duckdb.DuckDBPyConnection:
@@ -77,6 +77,16 @@ def cmd_market(args, paths):
     metrics.create_macros(con)
     metrics.build_stock_crowding(con, min_holders=args.min_holders)
     print("Crowding scores updated with ownership and days to exit. Next: ward report")
+
+
+def cmd_dashboard(args, paths):
+    con = _connect(paths)
+    try:
+        path = dashboard.write(con, paths.out)
+    except RuntimeError as e:
+        raise SystemExit(f"Error: {e}")
+    print(f"Wrote {path.resolve()}")
+    print("Open it in a browser. It is one self-contained file you can share.")
 
 
 def _pct(x):
@@ -259,6 +269,9 @@ def main(argv=None):
 
     s = sub.add_parser("sample", help="write small sample data to try the pipeline offline")
     s.set_defaults(fn=cmd_sample)
+
+    db = sub.add_parser("dashboard", help="write a self-contained HTML dashboard")
+    db.set_defaults(fn=cmd_dashboard)
 
     st = sub.add_parser("stress", help="run the pre-registered stress test (see PREREGISTRATION.md)")
     st.add_argument("--public", action="store_true",

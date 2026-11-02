@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sentry Ward</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap">
+<style>
+/* Terminal layout: one dense column of numbered panels under a command bar. */
+:root {
+  --bg: #050505; --panel: #0b0b0b; --panel-2: #121212; --line: #262626; --line-2: #1a1a1a;
+  --fg: #e6e3da; --dim: #8c8a82; --faint: #5e5c56;
+  --amber: #ffb000; --amber-ink: #050505; --hot: #ff6a00; --cool: #3fa9f5;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--mono); font-size: 13px; }
+a { color: var(--amber); }
+button { font-family: inherit; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+.bar { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; background: var(--amber); color: var(--amber-ink);
+       padding: 6px max(16px, env(safe-area-inset-left, 0px)); font-weight: 700; }
+.bar .tag { font-weight: 800; letter-spacing: .06em; }
+.bar .meta { font-weight: 500; }
+.bar .right { margin-left: auto; font-weight: 500; }
+.fkeys { display: flex; flex-wrap: wrap; gap: 1px; background: var(--line); border-bottom: 1px solid var(--line); }
+.fkeys a { flex: 1 1 110px; background: var(--panel); color: var(--fg); text-decoration: none; padding: 6px 10px; display: flex; gap: 8px; align-items: center; }
+.fkeys a:hover { background: var(--panel-2); }
+.fkeys b { background: var(--line); color: var(--amber); padding: 1px 6px; font-weight: 700; }
+
+main { max-width: 1440px; margin: 0 auto; padding: 12px max(16px, env(safe-area-inset-right, 0px)) 32px max(16px, env(safe-area-inset-left, 0px));
+       display: flex; flex-direction: column; gap: 12px; }
+.row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+.row > * { min-width: 0; }
+.w-wide { flex: 999 1 640px; } .w-side { flex: 1 1 440px; } .w-half { flex: 1 1 520px; }
+
+section { border: 1px solid var(--line); background: var(--panel); scroll-margin-top: 8px; }
+section > h2 { margin: 0; display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: space-between; align-items: baseline;
+               background: #161616; border-bottom: 1px solid var(--line); padding: 5px 10px; font-size: 13px; color: var(--amber); font-weight: 700; }
+section > h2 small { color: var(--dim); font-weight: 400; font-size: 11px; }
+.body { padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+.note { color: var(--dim); font-size: 11px; line-height: 1.5; max-width: 90ch; }
+.scroll { overflow-x: auto; }
+
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); }
+.kpi { background: var(--panel); padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; }
+.kpi .l { color: var(--dim); font-size: 11px; letter-spacing: .06em; }
+.kpi .v { color: var(--amber); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.kpi .d { font-size: 12px; color: var(--dim); }
+
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th { color: var(--dim); font-weight: 500; font-size: 11px; text-align: right; padding: 6px 8px; white-space: nowrap; }
+td { padding: 5px 8px; border-top: 1px solid var(--line-2); text-align: right; white-space: nowrap; }
+th.l, td.l { text-align: left; }
+tbody tr:nth-child(even) { background: #0e0e0e; }
+.tk { color: var(--amber); font-weight: 700; }
+.nm { color: var(--fg); max-width: 26ch; overflow: hidden; text-overflow: ellipsis; }
+.hot { color: var(--hot); } .cool { color: var(--cool); } .dim { color: var(--dim); }
+.chip { display: inline-block; padding: 0 5px; font-size: 10px; font-weight: 700; letter-spacing: .04em; border: 1px solid currentColor; }
+.meter { display: flex; align-items: center; gap: 6px; min-width: 120px; }
+.meter .track { flex: 1; height: 7px; background: #1c1c1c; }
+.meter .fill { height: 7px; }
+.meter span { width: 30px; text-align: right; font-weight: 700; }
+
+.toggle { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.toggle .lbl { color: var(--dim); font-size: 11px; margin-right: 2px; }
+.toggle button { min-height: 32px; min-width: 48px; padding: 0 10px; background: var(--bg); color: var(--fg); border: 1px solid #3a3a3a; cursor: pointer; font-size: 12px; }
+.toggle button[aria-pressed="true"] { background: var(--amber); color: var(--amber-ink); border-color: var(--amber); font-weight: 800; }
+
+.heat { display: grid; gap: 2px; font-variant-numeric: tabular-nums; font-size: 11px; }
+.heat div { height: 28px; display: flex; align-items: center; justify-content: center; }
+.heat .rl { justify-content: flex-start; color: var(--dim); white-space: nowrap; padding-right: 6px; }
+.heat .cl { color: var(--dim); font-size: 10px; height: 22px; }
+
+.verdict { border-left: 3px solid var(--hot); padding: 6px 10px; background: #120c07; }
+.verdict b { color: var(--hot); }
+svg text { font-family: var(--mono); }
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1px; background: var(--line-2); }
+.notes div { background: var(--panel); padding: 8px 10px; line-height: 1.5; }
+.notes b { color: var(--amber); font-weight: 700; }
+footer { color: var(--faint); font-size: 11px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; border-top: 1px solid var(--line-2); padding-top: 6px; }
+@media (prefers-reduced-motion: no-preference) { .fill { transition: width .25s ease; } }
+</style>
+</head>
+<body>
+<div class="bar">
+  <span class="tag">WARD</span><span>SENTRY WARD · HIDDEN CROWDING</span>
+  <span class="meta" id="barMeta"></span>
+  <span class="right" id="barRight"></span>
+</div>
+<nav class="fkeys" aria-label="Panels">
+  <a href="#summary"><b>F1</b>SUMMARY</a><a href="#crowded"><b>F2</b>CROWDED</a><a href="#exit"><b>F3</b>HARD EXIT</a>
+  <a href="#overlap"><b>F4</b>OVERLAP</a><a href="#index"><b>F5</b>INDEX</a><a href="#stress"><b>F6</b>STRESS</a>
+  <a href="#unwind"><b>F7</b>UNWIND</a><a href="#funds"><b>F8</b>FUNDS</a>
+</nav>
+<main>
+  <section id="summary"><h2>1) SUMMARY <small id="sumNote"></small></h2><div class="kpis" id="kpis"></div></section>
+
+  <div class="row">
+    <section id="crowded" class="w-wide"><h2>2) MOST CROWDED STOCKS <small>ETFs excluded · score 0-100</small></h2>
+      <div class="body"><div class="scroll"><table id="tStocks"></table></div>
+      <div class="note">Funds = universe funds holding it. Own = share of the company they own together. Exit = trading days to sell it all at 20% of daily volume. Exit risk = percentile of both. HARD EXIT = top 25% for both crowding and days to exit.</div></div></section>
+    <section id="exit" class="w-side"><h2>3) CROWDED AND HARD TO EXIT <small>top 25% crowding and days to exit</small></h2>
+      <div class="body"><div class="scroll"><table id="tExit"></table></div></div></section>
+  </div>
+
+  <div class="row">
+    <section id="overlap" class="w-wide"><h2>4) FUND OVERLAP MATRIX <small id="ovNote"></small></h2>
+      <div class="body">
+        <div class="toggle" id="ovToggle"><span class="lbl">SHOW</span></div>
+        <div class="scroll"><div class="heat" id="heat"></div></div>
+        <div class="note" id="ovExplain"></div>
+      </div></section>
+    <section id="pairs" class="w-side"><h2>MOST SIMILAR PAIRS <small>by active overlap</small></h2>
+      <div class="body"><div class="scroll"><table id="tPairs"></table></div>
+      <div class="note">Active = share of the bets each fund makes beyond the market that are the same bet. Raw = share of the two portfolios that is identical.</div></div></section>
+  </div>
+
+  <section id="index"><h2>5) CROWDING INDEX BY QUARTER <small>average over fund pairs · dashed lines = stress test events</small></h2>
+    <div class="body"><div class="row"><div class="w-half" id="chRaw"></div><div class="w-half" id="chActive"></div></div>
+    <div class="note" id="idxNote"></div></div></section>
+
+  <section id="stress"><h2>6) STRESS TEST <small>pre-registered · crowded minus matched peers in sell-offs</small></h2>
+    <div class="body" id="stressBody"></div></section>
+
+  <section id="unwind"><h2>7) UNWIND SIMULATOR <small>square-root impact model</small></h2>
+    <div class="body">
+      <div class="row"><div class="toggle" id="uFrac"><span class="lbl">FUNDS SELL</span></div><div class="toggle" id="uDays"><span class="lbl">OVER</span></div></div>
+      <div class="scroll"><table id="tUnwind"></table></div>
+      <div class="note">Estimated price move = 0.7 × daily volatility × √(shares sold ÷ average daily volume), a standard rule of thumb for large trades. Spreading the sale over more days lowers the share of daily volume, not the estimated move, in this simple model. Orange: over 20% of daily volume, or a move of 2.5% or more. An illustration, not a forecast.</div>
+    </div></section>
+
+  <div class="row">
+    <section id="funds" class="w-wide"><h2>8) FUNDS <small>most index-like first</small></h2>
+      <div class="body"><div class="scroll"><table id="tFunds"></table></div></div></section>
+    <section id="etfs" class="w-side"><h2>ETFS HELD MOST WIDELY <small>kept out of all scores</small></h2>
+      <div class="body"><div class="scroll"><table id="tEtfs"></table></div></div></section>
+  </div>
+
+  <section id="notes"><h2>9) WHAT THIS CAN AND CANNOT SEE</h2>
+    <div class="notes">
+      <div><b>SRC </b>SEC Form 13F holdings, Yahoo Finance prices and volume, SEC XBRL shares outstanding, OpenFIGI ticker mapping.</div>
+      <div><b class="hot">GAP </b>13F shows long US stock positions only. Shorts, options, futures and non-US stocks are invisible, and holdings are quarter-end snapshots filed up to 45 days later.</div>
+      <div><b>MTH </b>Share classes merged by issuer, unit errors fixed, ETFs separated. Active overlap compares bets beyond the 13F market. The stress test design was committed before it was run.</div>
+    </div>
+    <div class="body"><footer><span id="footL"></span><span id="footR"></span></footer></div>
+  </section>
+</main>
+
+<script>
+const DATA = /*__DATA__*/null;
+
+// ---------------------------------------------------------------- helpers
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null) continue;
+    if (k === "class") e.className = v; else if (k === "style") e.style.cssText = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v);
+  }
+  for (const c of kids.flat()) if (c != null) e.append(c instanceof Node ? c : String(c));
+  return e;
+}
+const SVGNS = "http://www.w3.org/2000/svg";
+function sv(tag, attrs, text) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
+  if (text != null) e.textContent = text;
+  return e;
+}
+const isNum = v => typeof v === "number" && isFinite(v);
+const pct = (v, d = 1, sign = false) => isNum(v) ? (sign && v > 0 ? "+" : "") + (100 * v).toFixed(d) + "%" : "—";
+const num = (v, d = 1) => isNum(v) ? v.toFixed(d) : "—";
+const bn = v => isNum(v) ? "$" + (v / 1e9).toFixed(v >= 1e10 ? 1 : 2) + "B" : "—";
+const money = v => !isNum(v) ? "—" : v >= 1e9 ? "$" + (v / 1e9).toFixed(1) + "B" : "$" + (v / 1e6).toFixed(0) + "M";
+const quarter = p => { const [y, m] = p.split("-").map(Number); return `Q${Math.ceil(m / 3)} ${y}`; };
+function meter(v, max, color) {
+  const w = isNum(v) ? Math.max(0, Math.min(100, 100 * v / max)) : 0;
+  return el("div", { class: "meter" },
+    el("div", { class: "track" }, el("div", { class: "fill", style: `width:${w}%;background:${color}` })),
+    el("span", {}, isNum(v) ? v.toFixed(0) : "—"));
+}
+function table(id, head, rows) {
+  const t = document.getElementById(id);
+  t.replaceChildren(
+    el("thead", {}, el("tr", {}, head.map(([label, cls]) => el("th", { class: cls || null, scope: "col" }, label)))),
+    el("tbody", {}, rows.length ? rows : [el("tr", {}, el("td", { class: "l dim", colspan: head.length }, "No data"))]));
+}
+function toggle(id, options, current, onPick) {
+  const box = document.getElementById(id);
+  const draw = sel => {
+    box.querySelectorAll("button").forEach(b => b.remove());
+    for (const [val, label] of options) {
+      box.append(el("button", { type: "button", "aria-pressed": String(val === sel), onclick: () => { draw(val); onPick(val); } }, label));
+    }
+  };
+  draw(current);
+}
+
+// ---------------------------------------------------------------- header and summary
+const hardSet = new Set(DATA.hard_exit.map(r => r.ticker));
+const idx = DATA.index, last = idx[idx.length - 1] || {};
+document.getElementById("barMeta").textContent = `SEC 13F · ${quarter(DATA.period)} · ${DATA.n_funds} funds`;
+document.getElementById("barRight").textContent = `BUILT ${DATA.generated}`;
+document.getElementById("sumNote").textContent = DATA.missing_funds.length ? `No filing this quarter: ${DATA.missing_funds.join(", ")}` : "";
+
+function kpi(label, value, detail, color) {
+  return el("div", { class: "kpi" }, el("div", { class: "l" }, label),
+    el("div", { class: "v", style: color ? `color:${color}` : null }, value), el("div", { class: "d" }, detail));
+}
+const h1 = DATA.stress.primary && DATA.stress.primary.h1 ? DATA.stress.primary.h1.summary : null;
+const chg = (v) => isNum(v) ? `${v > 0 ? "▲" : "▼"} ${(100 * Math.abs(v)).toFixed(2)} pts vs prior quarter, same funds` : "first quarter";
+document.getElementById("kpis").append(
+  kpi("RAW CROWDING INDEX", num(last.raw, 3), chg(last.raw_change)),
+  kpi("ACTIVE CROWDING INDEX", num(last.active, 3), chg(last.active_change)),
+  kpi("MOST CROWDED STOCK", DATA.stocks[0] ? DATA.stocks[0].ticker : "—",
+      DATA.stocks[0] ? `${DATA.stocks[0].holders} of ${DATA.stocks[0].n_funds} funds hold it` : ""),
+  kpi("PRICE COVERAGE", DATA.coverage ? pct(DATA.coverage.value_priced_share, 1) : "—",
+      DATA.coverage ? `of fund stock value · ${pct(DATA.coverage.value_with_shares_share, 0)} with shares outstanding` : "run ward market"),
+  kpi("STRESS TEST H1", h1 ? pct(h1.avg_diff, 1, true) : "—",
+      h1 ? `crowded vs matched, avg of ${h1.events} sell-offs (${pct(h1.ci_low, 1, true)} to ${pct(h1.ci_high, 1, true)})` : "run ward stress",
+      h1 ? (h1.ci_high < 0 ? "var(--hot)" : "var(--fg)") : null),
+);
+
+// ---------------------------------------------------------------- crowded stocks
+table("tStocks",
+  [["#"], ["TICKER", "l"], ["NAME", "l"], ["FUNDS"], ["OWN"], ["EXIT DAYS"], ["EXIT RISK", "l"], ["SCORE", "l"], ["Δ QoQ"]],
+  DATA.stocks.map(s => el("tr", {},
+    el("td", { class: "dim" }, s.rank),
+    el("td", { class: "l tk" }, s.ticker, hardSet.has(s.ticker) ? [" ", el("span", { class: "chip hot" }, "HARD EXIT")] : null),
+    el("td", { class: "l nm", title: s.issuer }, s.issuer),
+    el("td", {}, `${s.holders}/${s.n_funds}`),
+    el("td", {}, pct(s.own, 2)),
+    el("td", { class: isNum(s.dte) && s.dte >= 15 ? "hot" : null }, num(s.dte)),
+    el("td", { class: "l" }, meter(s.exit_risk, 100, "var(--hot)")),
+    el("td", { class: "l" }, meter(s.score, 100, "var(--amber)")),
+    el("td", { class: isNum(s.change) ? (s.change > 0 ? "hot" : "cool") : "dim" }, isNum(s.change) ? (s.change > 0 ? "+" : "") + s.change.toFixed(1) : "new"))));
+
+table("tExit", [["TICKER", "l"], ["FUNDS"], ["OWN"], ["EXIT DAYS"], ["RISK"]],
+  DATA.hard_exit.map(s => el("tr", {},
+    el("td", { class: "l tk", title: s.issuer }, s.ticker), el("td", {}, s.holders), el("td", {}, pct(s.own, 1)),
+    el("td", { class: "hot" }, num(s.dte)), el("td", {}, num(s.exit_risk, 0)))));
+
+// ---------------------------------------------------------------- overlap heatmap
+const styleOf = Object.fromEntries(DATA.funds.map(f => [f.fund, f.style || ""]));
+const STYLE_ORDER = ["multi-manager", "quant", "macro", "tiger-cub", "fundamental", "activist"];
+const abbr = n => n.replace(/[^A-Za-z0-9]/g, "").slice(0, 5).toUpperCase();
+function drawHeat(which) {
+  const m = which === "active" ? DATA.active_overlap : DATA.overlap;
+  const order = m.funds.map((f, i) => [f, i]).sort((a, b) =>
+    (STYLE_ORDER.indexOf(styleOf[a[0]]) - STYLE_ORDER.indexOf(styleOf[b[0]])) || a[0].localeCompare(b[0]));
+  const vals = m.values.flat().filter((v, k) => isNum(v) && v < 0.9999);
+  const max = Math.max(0.05, ...vals);
+  const heat = document.getElementById("heat");
+  heat.style.gridTemplateColumns = `118px repeat(${order.length}, minmax(30px, 1fr))`;
+  heat.style.minWidth = `${118 + 32 * order.length}px`;
+  const cells = [el("div", {})];
+  for (const [f] of order) cells.push(el("div", { class: "cl", title: f }, abbr(f)));
+  for (const [fa, i] of order) {
+    cells.push(el("div", { class: "rl", title: styleOf[fa] }, fa));
+    for (const [fb, j] of order) {
+      if (i === j) { cells.push(el("div", { style: "background:#0f0f0f;color:#3a3a3a" }, "··")); continue; }
+      const v = m.values[i][j];
+      if (!isNum(v)) { cells.push(el("div", { style: "background:#0f0f0f;color:#3a3a3a" }, "–")); continue; }
+      const t = Math.min(v / max, 1);
+      const r = Math.round(20 + 235 * t), g = Math.round(20 + 86 * t), b = Math.round(20 - 20 * t);
+      cells.push(el("div", { title: `${fa} × ${fb}: ${v.toFixed(3)}`,
+        style: `background:rgb(${r},${g},${b});color:${t > 0.65 ? "#050505" : "#e6e3da"};font-weight:${t > 0.65 ? 800 : 400}` },
+        Math.round(100 * v)));
+    }
+  }
+  heat.replaceChildren(...cells);
+  document.getElementById("ovNote").textContent = `${quarter(DATA.period)} · ${which === "active" ? "active" : "raw"} overlap, % · darkest = ${Math.round(100 * max)}`;
+  document.getElementById("ovExplain").textContent = which === "active"
+    ? "Active overlap: of the bets each fund makes beyond the overall 13F market, the share that is the same bet. This removes overlap that comes only from both funds holding big index names."
+    : "Raw overlap: the share of two portfolios that is identical. Large diversified funds score high partly because both resemble the market.";
+}
+toggle("ovToggle", [["active", "ACTIVE"], ["raw", "RAW"]], "active", drawHeat);
+drawHeat("active");
+
+table("tPairs", [["PAIR", "l"], ["ACTIVE"], ["RAW"], ["STOCKS"]],
+  DATA.pairs.map(p => el("tr", {},
+    el("td", { class: "l" }, `${p.fund_a} · ${p.fund_b}`),
+    el("td", { class: "tk" }, num(p.active_overlap, 3)), el("td", {}, num(p.raw_overlap, 3)), el("td", { class: "dim" }, p.shared_stocks))));
+
+// ---------------------------------------------------------------- index charts
+function lineChart(hostId, key, label, color) {
+  const host = document.getElementById(hostId);
+  const pts = idx.filter(r => isNum(r[key]));
+  const W = 640, H = 210, L = 52, R = 14, T = 26, B = 30;
+  const svg = sv("svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", role: "img", "aria-label": `${label} by quarter` });
+  svg.append(sv("text", { x: L, y: 14, fill: "#8c8a82", "font-size": 11 }, label));
+  if (pts.length < 2) { host.replaceChildren(svg); return; }
+  const t0 = Date.parse(pts[0].period), t1 = Date.parse(pts[pts.length - 1].period);
+  const ys = pts.map(p => p[key]);
+  let lo = Math.min(...ys), hi = Math.max(...ys); const pad = (hi - lo) * 0.15 || 0.01; lo -= pad; hi += pad;
+  const x = t => L + (W - L - R) * (t - t0) / (t1 - t0), y = v => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+  for (let k = 0; k <= 3; k++) {
+    const v = lo + (hi - lo) * k / 3, yy = y(v);
+    svg.append(sv("line", { x1: L, x2: W - R, y1: yy, y2: yy, stroke: "#1c1c1c" }));
+    svg.append(sv("text", { x: L - 6, y: yy + 4, fill: "#8c8a82", "font-size": 10, "text-anchor": "end" }, v.toFixed(3)));
+  }
+  for (const ev of DATA.events) {
+    const t = Date.parse(ev.start); if (t < t0 || t > t1) continue;
+    const xx = x(t);
+    svg.append(sv("line", { x1: xx, x2: xx, y1: T, y2: H - B, stroke: "#5e3a1a", "stroke-dasharray": "3 3" }));
+  }
+  let lastYear = null;
+  for (const p of pts) {
+    const yr = p.period.slice(0, 4);
+    if (yr !== lastYear) {
+      lastYear = yr;
+      svg.append(sv("text", { x: x(Date.parse(p.period)), y: H - 10, fill: "#8c8a82", "font-size": 10, "text-anchor": "middle" }, yr));
+    }
+  }
+  const d = pts.map((p, i) => `${i ? "L" : "M"}${x(Date.parse(p.period)).toFixed(1)},${y(p[key]).toFixed(1)}`).join("");
+  const area = `${d}L${x(t1).toFixed(1)},${H - B}L${L},${H - B}Z`;
+  svg.append(sv("path", { d: area, fill: color, "fill-opacity": 0.08 }));
+  svg.append(sv("path", { d, fill: "none", stroke: color, "stroke-width": 2 }));
+  const lp = pts[pts.length - 1];
+  svg.append(sv("circle", { cx: x(t1), cy: y(lp[key]), r: 4, fill: color }));
+  svg.append(sv("text", { x: x(t1) - 8, y: y(lp[key]) - 9, fill: color, "font-size": 11, "font-weight": 700, "text-anchor": "end" }, lp[key].toFixed(3)));
+  host.replaceChildren(svg);
+}
+lineChart("chRaw", "raw", "RAW INDEX · share of portfolios in common", "#ffb000");
+lineChart("chActive", "active", "ACTIVE INDEX · share of bets beyond the market in common", "#ff6a00");
+(() => {
+  const r = idx.filter(p => isNum(p.raw_change)), a = idx.filter(p => isNum(p.active_change));
+  const sum = (arr, k) => arr.reduce((s, p) => s + p[k], 0);
+  document.getElementById("idxNote").textContent = r.length
+    ? `Over the ${r.length} quarter-to-quarter changes, measured on the same fund pairs each time, raw overlap moved ${(100 * sum(r, "raw_change")).toFixed(1)} points in total and active overlap ${(100 * sum(a, "active_change")).toFixed(1)}. Funds converging on the same large stocks raises raw overlap without raising active overlap.`
+    : "";
+})();
+
+// ---------------------------------------------------------------- stress test
+function drawStress(test, run) {
+  const body = document.getElementById("stressBody");
+  const res = DATA.stress[run];
+  const controls = el("div", { class: "row" },
+    el("div", { class: "toggle", id: "sTest" }, el("span", { class: "lbl" }, "TEST")),
+    el("div", { class: "toggle", id: "sRun" }, el("span", { class: "lbl" }, "HOLDINGS")));
+  if (!res || !res[test]) {
+    body.replaceChildren(controls, el("div", { class: "note" }, "No stress test results yet. Run `ward stress` and `ward stress --public`, then `ward dashboard` again."));
+  } else {
+    const pe = res[test].per_event, sm = res[test].summary;
+    const lows = pe.map(p => p.ci_low).concat(sm.ci_low, 0), highs = pe.map(p => p.ci_high).concat(sm.ci_high, 0);
+    let lo = Math.min(...lows.filter(isNum)), hi = Math.max(...highs.filter(isNum));
+    const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+    const W = 1360, rowH = 34, L = 300, R = 260, T = 28, n = pe.length + 1, H = T + rowH * n + 28;
+    const x = v => L + (W - L - R) * (v - lo) / (hi - lo);
+    const svg = sv("svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", role: "img",
+                            "aria-label": "Crowded minus matched return in each sell-off, with 95% intervals" , style: "min-width:760px;max-width:1360px" });
+    svg.append(sv("text", { x: x(lo) + 2, y: 14, fill: "#8c8a82", "font-size": 11 }, "◀ crowded fell MORE"));
+    svg.append(sv("text", { x: x(hi) - 2, y: 14, fill: "#8c8a82", "font-size": 11, "text-anchor": "end" }, "crowded fell LESS ▶"));
+    svg.append(sv("line", { x1: x(0), x2: x(0), y1: T - 4, y2: H - 24, stroke: "#5e5c56" }));
+    const tickStep = (hi - lo) > 0.08 ? 0.02 : 0.01;
+    for (let v = Math.ceil(lo / tickStep) * tickStep; v <= hi; v += tickStep) {
+      svg.append(sv("text", { x: x(v), y: H - 8, fill: "#5e5c56", "font-size": 10, "text-anchor": "middle" }, pct(v, 0, true)));
+    }
+    const rows = pe.map(p => ({ label: p.event, sub: `holdings ${p.formation}`, d: p.diff, lo: p.ci_low, hi: p.ci_high }))
+      .concat([{ label: `AVERAGE OF ${sm.events}`, sub: "all events", d: sm.avg_diff, lo: sm.ci_low, hi: sm.ci_high, avg: true }]);
+    rows.forEach((r, k) => {
+      const yy = T + rowH * k + rowH / 2;
+      if (r.avg) svg.append(sv("line", { x1: 0, x2: W, y1: yy - rowH / 2, y2: yy - rowH / 2, stroke: "#262626" }));
+      svg.append(sv("text", { x: 0, y: yy - 2, fill: r.avg ? "#ffb000" : "#e6e3da", "font-size": 12, "font-weight": r.avg ? 700 : 400 }, r.label));
+      svg.append(sv("text", { x: 0, y: yy + 11, fill: "#5e5c56", "font-size": 10 }, r.sub));
+      const sig = isNum(r.hi) && r.hi < 0 ? "#ff6a00" : isNum(r.lo) && r.lo > 0 ? "#3fa9f5" : "#8c8a82";
+      if (isNum(r.lo) && isNum(r.hi)) {
+        svg.append(sv("line", { x1: x(r.lo), x2: x(r.hi), y1: yy, y2: yy, stroke: sig, "stroke-width": 2 }));
+        for (const e of [r.lo, r.hi]) svg.append(sv("line", { x1: x(e), x2: x(e), y1: yy - 5, y2: yy + 5, stroke: sig, "stroke-width": 2 }));
+      }
+      if (isNum(r.d)) svg.append(sv(r.avg ? "rect" : "circle", r.avg
+        ? { x: x(r.d) - 5, y: yy - 5, width: 10, height: 10, fill: "#ffb000" }
+        : { cx: x(r.d), cy: yy, r: 5, fill: sig === "#8c8a82" ? "#e6e3da" : sig }));
+      svg.append(sv("text", { x: W - R + 16, y: yy + 4, fill: r.avg ? "#ffb000" : "#e6e3da", "font-size": 12, "font-weight": r.avg ? 700 : 400 },
+        `${pct(r.d, 1, true)}  [${pct(r.lo, 1, true)}, ${pct(r.hi, 1, true)}]`));
+    });
+    const supported = isNum(sm.ci_high) && sm.ci_high < 0;
+    const name = test === "h1" ? "H1: crowded stocks (top 10%) fall more than matched peers" : "H2: crowded and hard-to-exit stocks fall more than matched peers";
+    const verdict = el("div", { class: "verdict" }, el("b", {}, supported ? "SUPPORTED" : "NOT SUPPORTED"), ` · ${name}. Average ${pct(sm.avg_diff, 1, true)}, 95% interval ${pct(sm.ci_low, 1, true)} to ${pct(sm.ci_high, 1, true)}; crowded fell more in ${sm.events_negative} of ${sm.events} events.`);
+    body.replaceChildren(controls, verdict, el("div", { class: "scroll" }, svg),
+      el("div", { class: "note" }, "Each line is a 95% bootstrap interval for the crowded group's return minus that of stocks with similar size and beta. Orange: crowded fell significantly more. Blue: significantly less. The design (events, groups, matching) was committed in PREREGISTRATION.md before the test was run."));
+  }
+  toggle("sTest", [["h1", "H1 CROWDED"], ["h2", "H2 HARD EXIT"]], test, v => drawStress(v, run));
+  toggle("sRun", [["primary", "LAST QUARTER END"], ["public", "PUBLIC 45+ DAYS"]], run, v => drawStress(test, v));
+}
+drawStress("h1", "primary");
+
+// ---------------------------------------------------------------- unwind simulator
+let uFrac = 0.25, uDays = 5;
+function drawUnwind() {
+  const rows = DATA.stocks.filter(s => isNum(s.adv_shares) && s.adv_shares > 0 && isNum(s.daily_vol) && isNum(s.total_shares)).slice(0, 15)
+    .map(s => {
+      const sold = uFrac * s.total_shares, part = sold / uDays / s.adv_shares;
+      const move = 0.7 * s.daily_vol * Math.sqrt(sold / s.adv_shares);
+      return { s, value: isNum(s.close) ? sold * s.close : uFrac * s.value_usd, part, move };
+    })
+    .sort((a, b) => b.move - a.move);
+  table("tUnwind", [["TICKER", "l"], ["NAME", "l"], ["VALUE SOLD"], ["PER DAY, % OF VOLUME"], ["EST. PRICE MOVE"], ["", "l"]],
+    rows.map(r => el("tr", {},
+      el("td", { class: "l tk" }, r.s.ticker), el("td", { class: "l nm", title: r.s.issuer }, r.s.issuer),
+      el("td", {}, money(r.value)),
+      el("td", { class: r.part > 0.2 ? "hot" : null }, pct(r.part, 0)),
+      el("td", { class: r.move >= 0.025 ? "hot" : null, style: "font-weight:700" }, pct(-r.move, 1)),
+      el("td", { class: "l" }, el("div", { class: "meter", style: "min-width:140px" }, el("div", { class: "track" },
+        el("div", { class: "fill", style: `width:${Math.min(100, 100 * r.move / 0.08)}%;background:${r.move >= 0.025 ? "var(--hot)" : "var(--amber)"}` })))))));
+}
+toggle("uFrac", [[0.1, "10%"], [0.25, "25%"], [0.5, "50%"]], uFrac, v => { uFrac = v; drawUnwind(); });
+toggle("uDays", [[1, "1D"], [5, "5D"], [10, "10D"]], uDays, v => { uDays = v; drawUnwind(); });
+drawUnwind();
+
+// ---------------------------------------------------------------- funds and ETFs
+table("tFunds", [["FUND", "l"], ["STYLE", "l"], ["STOCKS"], ["13F VALUE"], ["ETF SHARE"], ["ACTIVE SHARE", "l"]],
+  DATA.funds.map(f => el("tr", {},
+    el("td", { class: "l" }, f.fund), el("td", { class: "l dim" }, f.style || ""), el("td", {}, f.stocks),
+    el("td", {}, bn(f.value_usd)), el("td", {}, pct(f.etf_share, 0)),
+    el("td", { class: "l" }, el("div", { class: "meter" }, el("div", { class: "track" },
+      el("div", { class: "fill", style: `width:${isNum(f.active_share) ? 100 * f.active_share : 0}%;background:var(--amber)` })),
+      el("span", {}, num(f.active_share, 2)))))));
+table("tEtfs", [["NAME", "l"], ["CLASS", "l"], ["FUNDS"], ["VALUE"]],
+  DATA.etfs.map(e => el("tr", {},
+    el("td", { class: "l nm", title: e.issuer }, e.issuer), el("td", { class: "l dim" }, e.class || ""),
+    el("td", {}, e.holders), el("td", {}, bn(e.value_usd)))));
+
+document.getElementById("footL").textContent = `DATA: SEC EDGAR 13F · YAHOO FINANCE · SEC XBRL · OPENFIGI`;
+document.getElementById("footR").textContent = `QUARTER ENDING ${DATA.period} · BUILT ${DATA.generated}`;
+</script>
+</body>
+</html>
