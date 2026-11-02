@@ -1,68 +1,89 @@
 # Sentry Ward
 
-Reveals when hedge funds that look independent are secretly holding the same stocks,
-using the holdings they report to the SEC every quarter on Form 13F.
+**Hidden crowding among hedge funds, measured from public SEC filings.**
+
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
+![DuckDB](https://img.shields.io/badge/DuckDB-SQL-d97706)
+![Data](https://img.shields.io/badge/data-SEC%20Form%2013F-0891b2)
+![Stress test](https://img.shields.io/badge/stress%20test-pre--registered-16a34a)
+
+![Sentry Ward dashboard](docs/dashboard.png)
+
+## About
+
+Multi-manager funds run many teams that are supposed to be independent. When those
+teams use the same data and models, they end up in the same trades, and a sell-off in
+one fund can spread to others. Sentry Ward measures that overlap from the holdings 24
+large hedge funds report to the SEC every quarter, then tests whether crowded stocks
+actually fall more when markets sell off.
 
 The name comes from Dota, where a sentry ward reveals invisible units. This tool does
 the same for crowding hidden behind diversification numbers.
 
-Multi-manager funds run many teams that are supposed to be independent. When those
-teams use the same data and models, they end up in the same trades, and a sell-off
-in one fund can spread to others. This project measures that overlap from public data.
+**Headline result:** crowding in the same large stocks rose through 2025, but
+crowding in the same independent bets did not. In a pre-registered test over six
+sell-offs, crowded stocks did not fall significantly more than comparable stocks. The
+one event leaning the other way was the March 2026 multi-manager drawdown. Details in
+[RESULTS.md](RESULTS.md).
 
-## What it produces
+## Install
 
-For each quarter:
+| Platform | Command |
+|---|---|
+| Windows (PowerShell) | `pip install -e ".[dev]"` then set variables with `$env:NAME = "value"` |
+| macOS / Linux | `pip install -e ".[dev]"` then set variables with `export NAME="value"` |
 
-- **Most crowded stocks**: how many funds in the universe hold each stock, how much
-  of their portfolios it takes up, and a 0 to 100 crowding score.
-- **Fund-to-fund overlap**, two ways:
-  - *Raw overlap*: the share of two portfolios that is identical (0 = nothing in
-    common, 1 = the same portfolio). Big diversified funds score high partly just
-    because both look like the market.
-  - *Active overlap*: of the bets each fund makes beyond the market, how much is the
-    same bet. This is the number that shows real crowding.
-- **Active share per fund**: how far each fund is from simply holding the market.
-- **Crowding index**: the average overlap across fund pairs each quarter, plus the
-  change measured only on pairs present in both quarters, so a fund joining or
-  leaving does not move the index by itself.
-- **ETFs** are listed separately and kept out of all scores, since funds mostly hold
-  them as hedges.
+| Variable | Needed for | Example |
+|---|---|---|
+| `SEC_USER_AGENT` | `download`, `market` (SEC requires a contact) | `Your Name your.email@example.com` |
+| `WARD_DATA` | where data and results go (default `data`) | `data` |
+| `OPENFIGI_API_KEY` | optional, makes `market` much faster | free key from openfigi.com |
 
-Results are printed and written to `data/out/` as CSV and JSON.
-
-## Quick start
+Try it without downloading anything:
 
 ```bash
-pip install -e ".[dev]"
-
-# Try it on small sample data (no download needed)
 export WARD_DATA=demo
-ward sample
-ward load
-ward build
-ward report
-
-# Real data from SEC
-export WARD_DATA=data
-export SEC_USER_AGENT="Your Name your.email@example.com"   # SEC requires this
-ward download --since 2019     # several GB; files already on disk are skipped
-ward load
-ward build --universe data/universe.csv
-ward market                    # tickers, prices, volume, shares outstanding
-ward report --period 2026-06-30
-ward stress                    # do crowded stocks fall more in sell-offs?
-ward stress --public
-ward dashboard                 # one self-contained HTML file with everything
+ward sample && ward load && ward build && ward report
 ```
 
-On Windows PowerShell, set variables like this instead of `export`:
+## Commands
 
-```powershell
-$env:WARD_DATA = "data"
-$env:SEC_USER_AGENT = "Your Name your.email@example.com"
-$env:OPENFIGI_API_KEY = "your-key"   # optional, makes ward market much faster
-```
+| Command | What it does | Time on full data |
+|---|---|---|
+| `ward download --since 2019` | Downloads SEC 13F data sets (several GB, resumable) | depends on connection |
+| `ward load` | Loads them into DuckDB and builds a clean holdings table | 10-20 min |
+| `ward build` | Matches funds to filers; scores, overlaps, crowding index | 5-15 min |
+| `ward market` | Tickers, prices, volume, shares outstanding (cached) | 5-60 min |
+| `ward report` | Prints the latest quarter; writes CSV and JSON | seconds |
+| `ward stress` / `ward stress --public` | Runs the pre-registered stress test | a few min |
+| `ward dashboard` | Writes one self-contained HTML dashboard | seconds |
+
+## What's in it
+
+**Data**
+- Every 13F holdings report since 2019, with amendments, unit changes and unit errors handled
+- Share classes merged by company; ETFs separated from stocks
+
+**Crowding**
+- Crowding score per stock, with ownership share, days to exit and exit risk
+- Raw and active overlap for every pair of funds; active share per fund
+- Quarterly crowding index with like-for-like changes
+
+**Research**
+- Pre-registered stress test over six sell-offs, matched on size and beta, with bootstrap intervals
+- Unwind simulator using the square-root market impact rule
+
+**Dashboard** (`ward dashboard`)
+
+| Screen | Shows |
+|---|---|
+| DASHBOARD | KPI strip, crowding map, crowding index, hard-to-exit list, stress result, top pairs |
+| CROWDED | The most crowded stocks with ownership, days to exit, exit risk and change |
+| OVERLAP | Fund-by-fund matrix (active or raw), grouped by fund style |
+| STRESS | Each event's result with 95% intervals; H1/H2, primary/public holdings |
+| UNWIND | Estimated price moves if crowded funds sell 10-50% over 1-10 days |
+| FUNDS | Funds from most index-like to least; ETFs held most widely |
+| ABOUT | Sources, blind spots and method |
 
 ## Pipeline
 
@@ -71,7 +92,10 @@ $env:OPENFIGI_API_KEY = "your-key"   # optional, makes ward market much faster
 | `download` | `sec13f.py` | Finds every 13F data set zip on SEC's page and downloads it |
 | `load` | `sec13f.py`, `clean.py` | Loads the raw tables into DuckDB, then builds one clean `holdings` table |
 | `build` | `metrics.py` | Matches the fund list to filers, computes weights, scores and overlaps |
-| `report` | `cli.py` | Prints one quarter and exports CSV and JSON for the dashboard |
+| `market` | `market.py` | Maps CUSIPs to tickers, downloads prices and shares outstanding, checks matches |
+| `report` | `cli.py` | Prints one quarter and exports CSV and JSON |
+| `stress` | `stress.py` | Runs the pre-registered stress test |
+| `dashboard` | `dashboard.py` | Builds the HTML dashboard from the database |
 
 ## Data rules
 
@@ -192,7 +216,7 @@ pytest
 
 The tests use synthetic filings small enough to check by hand. For example, three
 sample funds have overlaps of 0.80, 0.25 and 0.25, so the crowding index must be
-1.30 / 3. See `src/crowding/sample.py`.
+1.30 / 3. See `src/sentryward/sample.py`.
 
 ## Roadmap
 
@@ -202,3 +226,14 @@ sample funds have overlaps of 0.80, 0.25 and 0.25, so the crowding index must be
 - [x] Stress tests: do crowded stocks fall harder in sell-offs? (pre-registered)
 - [x] Unwind simulator (square-root impact model, in the dashboard)
 - [x] Dashboard (`ward dashboard`)
+
+## Contributing
+
+Issues and pull requests are welcome. Useful additions: more funds in
+`data/universe.csv`, other sell-off events (added as a new pre-registration, not by
+editing the existing one), and better sources for sector data. Run `pytest` before
+opening a pull request.
+
+## License
+
+No license has been chosen yet. Until one is added, all rights are reserved.
