@@ -51,6 +51,7 @@ ward load
 ward build --universe data/universe.csv
 ward market                    # tickers, prices, volume, shares outstanding
 ward report --period 2026-06-30
+ward stress                    # do crowded stocks fall more in sell-offs?
 ```
 
 On Windows PowerShell, set variables like this instead of `export`:
@@ -121,6 +122,24 @@ Known gaps: stocks that were later delisted often have no Yahoo data, which matt
 for stress tests (failed companies drop out). For share classes merged into one
 company, volume comes from the largest class only, so days to exit is overstated.
 
+## Stress test (`ward stress`)
+
+Do crowded stocks fall more than comparable stocks when the market sells off? The
+design was written in [PREREGISTRATION.md](PREREGISTRATION.md) and committed before
+the test was run on real data, so it could not be tuned to the results.
+
+- **Events:** COVID crash (2020), GameStop-week degrossing (2021), 2022 rate shock,
+  yen carry unwind (2024), tariff shock (2025), multi-manager drawdown (March 2026).
+- **H1:** top 10% by crowding score vs the rest. **H2:** stocks in the top 25% for both
+  crowding and days to exit vs the rest.
+- **Matching:** within size x beta buckets, because crowded stocks are often big
+  high-beta tech names that fall more in any sell-off. The tests include a case where
+  crowded stocks are simply high beta: a plain comparison reports a 6%+ "crowding
+  effect", the matched test reports about zero.
+- **Statistics:** bootstrap 95% intervals (2,000 resamples, seed 0), a regression
+  check, and the same measure in ordinary quarters for comparison.
+- `ward stress --public` uses only holdings that were public 45+ days before each event.
+
 ## Metric definitions
 
 - `weight`: position value / fund's total stock value that quarter (ETFs excluded)
@@ -172,6 +191,6 @@ sample funds have overlaps of 0.80, 0.25 and 0.25, so the crowding index must be
 - [x] 13F download, loading and cleaning
 - [x] Crowding scores, fund overlap, crowding index
 - [x] Market data: prices, volume, shares outstanding (CUSIP to ticker mapping)
-- [ ] Stress tests: do crowded stocks fall harder in sell-offs? (pre-registered)
+- [x] Stress tests: do crowded stocks fall harder in sell-offs? (pre-registered)
 - [ ] Unwind simulator
 - [ ] Dashboard

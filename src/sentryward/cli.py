@@ -9,7 +9,7 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
-from . import clean, config, market, metrics, sec13f
+from . import clean, config, market, metrics, sec13f, stress
 
 
 def _connect(paths: config.Paths) -> duckdb.DuckDBPyConnection:
@@ -77,6 +77,70 @@ def cmd_market(args, paths):
     metrics.create_macros(con)
     metrics.build_stock_crowding(con, min_holders=args.min_holders)
     print("Crowding scores updated with ownership and days to exit. Next: ward report")
+
+
+def _pct(x):
+    return "" if x is None or pd.isna(x) else f"{100 * x:+.1f}%"
+
+
+def cmd_stress(args, paths):
+    con = _connect(paths)
+    for t in ("stock_crowding", "market", "prices"):
+        if not metrics._has_table(con, t):
+            raise SystemExit("Run `ward build` and `ward market` first.")
+    if not stress.ensure_benchmark(con):
+        raise SystemExit(f"Could not download {stress.BENCHMARK} prices, which are needed for beta.")
+    which = "public holdings (45+ days old)" if args.public else "last quarter-end holdings before each event"
+    print(f"Running the pre-registered stress test (PREREGISTRATION.md) with {which}.")
+    print(f"Bootstrap: {args.reps:,} resamples, seed {stress.BOOT_SEED}. This can take a few minutes.\n")
+    res = stress.run(con, public=args.public, reps=args.reps)
+
+    skipped = res["events"][res["events"]["status"] != "ok"]
+    for _, r in skipped.iterrows():
+        print(f"Skipped {r['event']}: {r['status']}")
+
+    out = paths.out
+    suffix = "_public" if args.public else ""
+    payload = {"holdings": which, "reps": args.reps, "seed": stress.BOOT_SEED}
+    for test in ("H1 crowded", "H2 crowded and hard to exit"):
+        pe, sm = res[test]["per_event"], res[test]["summary"]
+        print(f"\n{test}: crowded minus matched comparison (size x beta), event return")
+        if not len(pe):
+            print("  (no events with both groups)")
+            continue
+        table = pd.DataFrame({
+            "event": pe["event"],
+            "holdings": pe["formation"].astype(str),
+            "stocks": pe["n_stocks"],
+            "crowded": pe["n_treated"],
+            "crowded_ret": pe["treated_ret"].map(_pct),
+            "matched_ret": pe["control_ret_matched"].map(_pct),
+            "difference": pe["diff"].map(_pct),
+            "95% interval": [f"{_pct(a)} to {_pct(b)}" for a, b in zip(pe["ci_low"], pe["ci_high"])],
+            "unmatched": pe["raw_diff"].map(_pct),
+            "regression": pe["regression_coef"].map(_pct),
+        })
+        print(table.to_string(index=False))
+        print(f"  Average over {sm['events']} events: {_pct(sm['avg_diff'])} "
+              f"(95% interval {_pct(sm['ci_low'])} to {_pct(sm['ci_high'])}); "
+              f"negative in {sm['events_negative']} of {sm['events']} events.")
+        key = "h1" if test.startswith("H1") else "h2"
+        pe.to_csv(out / f"stress_{key}{suffix}.csv", index=False)
+        payload[key] = {"summary": sm, "per_event": _records(pe.astype({"formation": str, "start": str, "end": str}))}
+
+    oq = res["ordinary_quarters"]
+    if len(oq):
+        d = oq["diff"]
+        print(f"\nOrdinary quarters (H1, quarter end to next quarter end, {len(oq)} quarters): "
+              f"average {_pct(d.mean())}, typical spread (std) {100 * d.std():.1f} points, "
+              f"range {_pct(d.min())} to {_pct(d.max())}.")
+        oq.to_csv(out / f"stress_ordinary_quarters{suffix}.csv", index=False)
+        payload["ordinary_quarters"] = _records(oq.astype({"from": str, "to": str}))
+    with open(out / f"stress{suffix}.json", "w") as fh:
+        json.dump(payload, fh, indent=2, allow_nan=False, default=float)
+    print(f"\nWrote CSV and JSON to {out}")
+    print("Unmatched = plain crowded minus everything else. Regression = crowded effect after beta,"
+          " size and 12-month momentum.")
 
 
 def _records(df):
@@ -195,6 +259,12 @@ def main(argv=None):
 
     s = sub.add_parser("sample", help="write small sample data to try the pipeline offline")
     s.set_defaults(fn=cmd_sample)
+
+    st = sub.add_parser("stress", help="run the pre-registered stress test (see PREREGISTRATION.md)")
+    st.add_argument("--public", action="store_true",
+                    help="use only holdings public 45+ days before each event")
+    st.add_argument("--reps", type=int, default=stress.BOOT_REPS, help="bootstrap resamples (default 2000)")
+    st.set_defaults(fn=cmd_stress)
 
     mk = sub.add_parser("market", help="fetch tickers, prices and shares outstanding")
     mk.add_argument("--since", type=int, default=2019, help="first year of prices (default 2019)")
