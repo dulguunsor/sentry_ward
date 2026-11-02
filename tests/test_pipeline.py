@@ -274,9 +274,9 @@ def test_score_change_only_vs_previous_quarter(built):
 def test_market_data_adds_ownership_and_days_to_exit(con, universe_csv):
     con.execute(
         """CREATE TABLE market AS SELECT * FROM (VALUES
-             (?, DATE '2026-06-30', 100.0, 10.0),
-             (?, DATE '2026-06-30', 1000.0, 100.0)
-           ) t(cusip, period, shares_outstanding, adv_shares)""",
+             (?, DATE '2026-06-30', 'AAA', 100.0, 100.0, 10.0, 0.02, true),
+             (?, DATE '2026-06-30', 'BBB', 100.0, 1000.0, 100.0, 0.02, false)
+           ) t(cusip, period, ticker, close, shares_outstanding, adv_shares, daily_vol, price_match)""",
         [CUSIP["AAA"], CUSIP["BBB"]],
     ).fetchall()
     metrics.build_all(con, universe_csv)
@@ -287,6 +287,12 @@ def test_market_data_adds_ownership_and_days_to_exit(con, universe_csv):
     ).fetchall()[0]
     # Citadel 5 + Point72 2 + Millennium 4 = 11 shares
     assert aaa == (11, pytest.approx(0.11), pytest.approx(11 / 2.0))
+    # BBB's price did not match the 13F price, so its market data is not used.
+    bbb = con.execute(
+        "SELECT hf_ownership FROM stock_crowding WHERE period = DATE '2026-06-30' AND cusip = ?",
+        [CUSIP["BBB"]],
+    ).fetchall()[0][0]
+    assert bbb is None
 
 
 # ------------------------------------------------------------ end to end

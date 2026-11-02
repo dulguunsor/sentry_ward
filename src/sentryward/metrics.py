@@ -25,9 +25,11 @@ overlap(A, B)   sum over stocks of min(weight_A, weight_B). 0 = nothing shared, 
 active_overlap  weighted Jaccard of the two funds' overweights:
                 sum min(over_A, over_B) / sum max(over_A, over_B).
                 "Of the bets these funds make beyond the market, how much is the same bet?"
-crowding_score  0-100, among stocks held by at least ``min_holders`` funds. holder_share and
-                sum_weight are divided by the quarter's top value; hf_ownership and
-                days_to_exit (when market data exists) use percentile ranks.
+crowding_score  0-100, among stocks held by at least ``min_holders`` funds: the average of
+                holder_share and sum_weight, each divided by the quarter's top value.
+exit_risk       0-100, where market data exists: average percentile rank of hf_ownership
+                and days_to_exit. Kept separate so missing market data never moves
+                a stock's crowding score.
 Stocks are grouped by company (first 6 CUSIP characters), so share classes count once.
 """
 
@@ -210,7 +212,7 @@ def build_fund_weights(con: duckdb.DuckDBPyConnection) -> None:
                    issuer_key(h.cusip, h.issuer)              AS issuer_id,
                    arg_max(h.cusip, h.value_usd)              AS cusip,
                    arg_max(clean_name(h.issuer), h.value_usd) AS issuer,
-                   arg_max(h.title_of_class, h.value_usd)     AS title_of_class,
+                   arg_max(clean_name(h.title_of_class), h.value_usd) AS title_of_class,
                    sum(h.value_usd)                           AS value_usd,
                    sum(h.shares)                              AS shares
             FROM holdings_ok h
@@ -290,14 +292,19 @@ def build_etf_holdings(con: duckdb.DuckDBPyConnection) -> None:
 def build_stock_crowding(con: duckdb.DuckDBPyConnection, min_holders: int = 2) -> None:
     market = _has_table(con, "market")
     market_cols = (
-        """, m.shares_outstanding, m.adv_shares,
+        """, m.ticker, m.close, m.shares_outstanding, m.adv_shares, m.daily_vol,
            s.total_shares / nullif(m.shares_outstanding, 0)        AS hf_ownership,
            s.total_shares / nullif(0.2 * m.adv_shares, 0)          AS days_to_exit"""
         if market
-        else """, NULL::DOUBLE AS shares_outstanding, NULL::DOUBLE AS adv_shares,
+        else """, NULL::VARCHAR AS ticker, NULL::DOUBLE AS close, NULL::DOUBLE AS shares_outstanding,
+           NULL::DOUBLE AS adv_shares, NULL::DOUBLE AS daily_vol,
            NULL::DOUBLE AS hf_ownership, NULL::DOUBLE AS days_to_exit"""
     )
-    market_join = "LEFT JOIN market m ON m.cusip = s.cusip AND m.period = s.period" if market else ""
+    # Only rows whose quarter-end price matches what 13F filers reported (see market.py).
+    market_join = (
+        "LEFT JOIN market m ON m.cusip = s.cusip AND m.period = s.period AND m.price_match"
+        if market else ""
+    )
 
     con.execute(
         f"""
@@ -334,8 +341,13 @@ def build_stock_crowding(con: duckdb.DuckDBPyConnection, min_holders: int = 2) -
         ),
         scored AS (
             SELECT *,
-                100 * (r_holders + r_weight + coalesce(r_own, 0) + coalesce(r_dte, 0))
-                    / (2 + (r_own IS NOT NULL)::INT + (r_dte IS NOT NULL)::INT) AS crowding_score
+                -- Same two inputs for every stock, so scores compare across stocks
+                -- whether or not market data exists.
+                100 * (r_holders + r_weight) / 2 AS crowding_score,
+                -- How hard it would be to get out, where market data exists.
+                CASE WHEN r_own IS NULL AND r_dte IS NULL THEN NULL
+                     ELSE 100 * (coalesce(r_own, 0) + coalesce(r_dte, 0))
+                          / ((r_own IS NOT NULL)::INT + (r_dte IS NOT NULL)::INT) END AS exit_risk
             FROM ranked
         )
         SELECT * EXCLUDE (prev_period, prev_score),

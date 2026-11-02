@@ -9,7 +9,7 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
-from . import clean, config, metrics, sec13f
+from . import clean, config, market, metrics, sec13f
 
 
 def _connect(paths: config.Paths) -> duckdb.DuckDBPyConnection:
@@ -59,6 +59,23 @@ def cmd_build(args, paths):
         print("  " + ", ".join(missing))
 
 
+def cmd_market(args, paths):
+    con = _connect(paths)
+    if not metrics._has_table(con, "fund_positions"):
+        raise SystemExit("Run `ward build` first: market data is fetched for the stocks the funds hold.")
+    skip = [name for name in ("figi", "prices", "shares") if getattr(args, f"skip_{name}")]
+    out = market.run_all(con, start=f"{args.since - 1}-09-01", skip=skip, refresh_prices=args.refresh_prices)
+    m = out["market"]
+    print(f"\nMarket table: {m['rows']:,} stock-quarters, {m['priced']:,} with prices, "
+          f"{m['matched']:,} matching the 13F price, {m['with_shares']:,} also with shares outstanding.")
+    cov = market.coverage(con)
+    print(f"Latest quarter: {cov['value_priced_share']:.1%} of the funds' stock value has usable prices, "
+          f"{cov['value_with_shares_share']:.1%} also has shares outstanding.")
+    metrics.create_macros(con)
+    metrics.build_stock_crowding(con, min_holders=args.min_holders)
+    print("Crowding scores updated with ownership and days to exit. Next: ward report")
+
+
 def _records(df):
     """Rows as dicts with missing values as None, so the JSON stays valid."""
     return df.astype(object).where(df.notna(), None).to_dict(orient="records")
@@ -78,15 +95,19 @@ def cmd_report(args, paths):
     period = args.period or con.execute("SELECT max(period)::VARCHAR FROM crowding_index").fetchall()[0][0]
     top = con.execute(
         """
-        SELECT crowding_rank AS rank, cusip, left(issuer, 28) AS issuer,
-               n_holders AS holders, round(holder_share, 3) AS holder_share,
-               round(sum_weight, 3) AS sum_weight, round(total_value_usd / 1e9, 2) AS value_bn,
+        SELECT crowding_rank AS rank, coalesce(ticker, cusip) AS ticker, left(issuer, 24) AS issuer,
+               n_holders AS holders, round(sum_weight, 3) AS sum_weight,
+               round(total_value_usd / 1e9, 2) AS value_bn,
+               round(100 * hf_ownership, 2) AS own_pct, round(days_to_exit, 1) AS dte,
+               round(exit_risk, 0) AS exit_risk,
                round(crowding_score, 1) AS score, round(score_change, 1) AS change
         FROM stock_crowding WHERE period = ?::DATE
         ORDER BY crowding_rank LIMIT ?
         """,
         [period, args.top],
     ).df()
+    if top["own_pct"].isna().all():
+        top = top.drop(columns=["own_pct", "dte", "exit_risk"])
     etfs = con.execute(
         """
         SELECT cusip, left(issuer, 28) AS issuer, left(coalesce(title_of_class, ''), 24) AS class,
@@ -120,7 +141,8 @@ def cmd_report(args, paths):
     print(f"\nQuarter ending {period}: {len(matrix)} funds reporting")
     if missing:
         print(f"No 13F holdings report this quarter: {', '.join(missing)}")
-    print("\nMost crowded stocks (ETFs excluded):")
+    print("\nMost crowded stocks (ETFs excluded). own_pct = share of the company the funds own;"
+          "\ndte = days to sell it all at 20% of daily volume; exit_risk = percentile of both:")
     print(_fmt(top))
     print("\nMost similar fund pairs, by active overlap (shared bets beyond the market):")
     print(_fmt(pairs))
@@ -170,6 +192,15 @@ def main(argv=None):
 
     s = sub.add_parser("sample", help="write small sample data to try the pipeline offline")
     s.set_defaults(fn=cmd_sample)
+
+    mk = sub.add_parser("market", help="fetch tickers, prices and shares outstanding")
+    mk.add_argument("--since", type=int, default=2019, help="first year of prices (default 2019)")
+    mk.add_argument("--min-holders", type=int, default=2)
+    mk.add_argument("--skip-figi", action="store_true", help="skip CUSIP to ticker mapping")
+    mk.add_argument("--skip-prices", action="store_true", help="skip Yahoo price download")
+    mk.add_argument("--skip-shares", action="store_true", help="skip SEC shares outstanding")
+    mk.add_argument("--refresh-prices", action="store_true", help="download prices again for every ticker")
+    mk.set_defaults(fn=cmd_market)
 
     l = sub.add_parser("load", help="load zips into DuckDB and build clean holdings")
     l.add_argument("--force", action="store_true", help="reload files already loaded")

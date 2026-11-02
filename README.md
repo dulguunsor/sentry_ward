@@ -49,6 +49,7 @@ export SEC_USER_AGENT="Your Name your.email@example.com"   # SEC requires this
 ward download --since 2019     # several GB; files already on disk are skipped
 ward load
 ward build --universe data/universe.csv
+ward market                    # tickers, prices, volume, shares outstanding
 ward report --period 2026-06-30
 ```
 
@@ -57,6 +58,7 @@ On Windows PowerShell, set variables like this instead of `export`:
 ```powershell
 $env:WARD_DATA = "data"
 $env:SEC_USER_AGENT = "Your Name your.email@example.com"
+$env:OPENFIGI_API_KEY = "your-key"   # optional, makes ward market much faster
 ```
 
 ## Pipeline
@@ -97,6 +99,28 @@ $env:SEC_USER_AGENT = "Your Name your.email@example.com"
 9. **One fund, many filers.** Filers matching the same name in `universe.csv` are
    combined, so a fund is never compared with itself.
 
+## Market data (`ward market`)
+
+| Data | Source | Notes |
+|---|---|---|
+| CUSIP to ticker | [OpenFIGI](https://www.openfigi.com/api) | Free. Without a key about 25 requests a minute of 10 CUSIPs; a free key (set `OPENFIGI_API_KEY`) allows 100 CUSIPs per request. |
+| Daily prices, volume, splits | Yahoo Finance via `yfinance` | Unofficial. Delisted stocks usually have no data. |
+| Shares outstanding | SEC XBRL frames | One request per quarter covers every US filer. Foreign companies (ADRs) are usually missing. |
+
+Everything is cached, so rerunning only fetches what is missing.
+
+Checks:
+- **Splits.** Yahoo adjusts old prices and volumes for later splits. 13F share counts
+  are as reported at the time, so the split adjustment is undone before comparing.
+- **Wrong tickers.** Tickers get reused after companies disappear. A stock's
+  quarter-end close must be within 0.8x to 1.25x of the median price per share 13F
+  filers reported, or its market data is not used.
+- `ward market` prints how much of the funds' stock value has usable data.
+
+Known gaps: stocks that were later delisted often have no Yahoo data, which matters
+for stress tests (failed companies drop out). For share classes merged into one
+company, volume comes from the largest class only, so days to exit is overstated.
+
 ## Metric definitions
 
 - `weight`: position value / fund's total stock value that quarter (ETFs excluded)
@@ -108,10 +132,11 @@ $env:SEC_USER_AGENT = "Your Name your.email@example.com"
 - `sum_weight`: sum of all funds' weights in the stock
 - `hf_ownership`: shares held by the universe / shares outstanding (needs market data)
 - `days_to_exit`: shares held / (20% of average daily volume) (needs market data)
-- `crowding_score`: 0 to 100, among stocks held by at least 2 funds. `holder_share`
-  and `sum_weight` are divided by the quarter's highest value, so the most crowded
-  stock scores near 100 and the rest spread out below it. `hf_ownership` and
-  `days_to_exit` use percentile ranks because they have extreme outliers.
+- `crowding_score`: 0 to 100, among stocks held by at least 2 funds: the average of
+  `holder_share` and `sum_weight`, each divided by the quarter's highest value.
+- `exit_risk`: 0 to 100, where market data exists: average percentile rank of
+  `hf_ownership` and `days_to_exit`. Kept separate from the crowding score so missing
+  market data never moves a stock's rank.
 - `crowding_rank`: position in the quarter's list, 1 = most crowded
 - `overlap(A, B)`: sum over stocks of min(weight_A, weight_B)
 - `active_overlap(A, B)`: sum of min(overweight_A, overweight_B) divided by sum of
@@ -146,7 +171,7 @@ sample funds have overlaps of 0.80, 0.25 and 0.25, so the crowding index must be
 
 - [x] 13F download, loading and cleaning
 - [x] Crowding scores, fund overlap, crowding index
-- [ ] Market data: prices, volume, shares outstanding (CUSIP to ticker mapping)
+- [x] Market data: prices, volume, shares outstanding (CUSIP to ticker mapping)
 - [ ] Stress tests: do crowded stocks fall harder in sell-offs? (pre-registered)
 - [ ] Unwind simulator
 - [ ] Dashboard
