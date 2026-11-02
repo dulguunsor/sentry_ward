@@ -59,6 +59,19 @@ def _session(session):
     return requests.Session()
 
 
+def _insert_rows(con: duckdb.DuckDBPyConnection, table: str, columns: list[str], rows: list[tuple],
+                 replace: bool = True) -> None:
+    """Insert many rows at once. DuckDB's executemany inserts row by row, which is very
+    slow for hundreds of thousands of rows."""
+    if not rows:
+        return
+    df = pd.DataFrame(rows, columns=columns)
+    con.register("_rows", df)
+    verb = "INSERT OR REPLACE INTO" if replace else "INSERT INTO"
+    con.execute(f"{verb} {table} ({', '.join(columns)}) SELECT {', '.join(columns)} FROM _rows").fetchall()
+    con.unregister("_rows")
+
+
 def _ensure_tables(con: duckdb.DuckDBPyConnection) -> None:
     con.execute(
         """
@@ -152,7 +165,8 @@ def map_cusips(
             raise RuntimeError("OpenFIGI kept refusing requests (HTTP 429). Try again later or set an API key.")
         rows = [_parse_figi(c, res) for c, res in zip(chunk, r.json())]
         found += sum(1 for row in rows if row[-1] == "ok")
-        con.executemany("INSERT OR REPLACE INTO cusip_map VALUES (?, ?, ?, ?, ?, ?, ?, now())", rows)
+        _insert_rows(con, "cusip_map",
+                     ["cusip", "ticker", "symbol", "figi", "security_type", "name", "status"], rows)
         if b % 50 == 0 or b == n_batches:
             log(f"  {b:,}/{n_batches:,} requests, {found:,} tickers found")
         if b < n_batches:
@@ -292,7 +306,7 @@ def fetch_shares(
     r.raise_for_status()
     tick = [(str(v["cik_str"]), yahoo_symbol(v["ticker"]), v.get("title")) for v in r.json().values()]
     con.execute("DELETE FROM sec_tickers").fetchall()
-    con.executemany("INSERT INTO sec_tickers VALUES (?, ?, ?)", tick)
+    _insert_rows(con, "sec_tickers", ["cik", "symbol", "title"], tick, replace=False)
 
     periods = [r[0] for r in con.execute("SELECT DISTINCT period FROM fund_positions ORDER BY period").fetchall()]
     done = {(r[0], r[1]) for r in con.execute("SELECT period, source FROM shares_status").fetchall()}
@@ -311,7 +325,7 @@ def fetch_shares(
                 resp.raise_for_status()
                 rows = [(str(d["cik"]), period, float(d["val"]), source) for d in resp.json().get("data", [])]
             if rows:
-                con.executemany("INSERT OR REPLACE INTO shares_out VALUES (?, ?, ?, ?)", rows)
+                _insert_rows(con, "shares_out", ["cik", "period", "shares", "source"], rows)
             con.execute("INSERT OR REPLACE INTO shares_status VALUES (?, ?, ?)", [period, source, len(rows)]).fetchall()
             added += len(rows)
     log(f"Shares outstanding: {added:,} new company-quarter values, {len(tick):,} SEC tickers")
