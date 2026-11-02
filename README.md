@@ -140,6 +140,12 @@ the test was run on real data, so it could not be tuned to the results.
   check, and the same measure in ordinary quarters for comparison.
 - `ward stress --public` uses only holdings that were public 45+ days before each event.
 
+**Result ([RESULTS.md](RESULTS.md)): neither hypothesis is supported.** Averaged over the
+six events, crowded stocks did not fall significantly more than matched peers (H1: +0.5%,
+95% interval -0.2% to +1.2%; with public holdings -0.2%, -1.0% to +0.6%). The one event
+leaning the other way is the March 2026 multi-manager drawdown, the sell-off most
+directly blamed on crowding (-1.1%, interval -2.2% to +0.1%).
+
 ## Metric definitions
 
 - `weight`: position value / fund's total stock value that quarter (ETFs excluded)
