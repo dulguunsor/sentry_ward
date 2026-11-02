@@ -15,7 +15,17 @@ Two files, in the two naming styles SEC has used:
     Point72     original AAA 100, CCC 300; restatement AAA 250, CCC 750 (replaces)
     Millennium  original AAA 400, BBB 400; new-holdings amendment adds DDD 200
     Notice filer 13F-NT (no holdings)          -> ignored
-    Vanguard    AAA 9,999,999 (not in universe) -> excluded from metrics
+    Vanguard    AAA 4850, BBB 1100, CCC 250, DDD 800 (not in universe)
+    Bad Units   AAA 500,000 for 5 shares: price 1000x the others -> dropped as a unit error
+
+Expected 2026 market (all filers, unit error dropped), total $10,000
+    AAA .60  BBB .20  CCC .10  DDD .10
+Expected overweights (weight - market, if positive) and active share
+    Citadel     BBB .30                .30
+    Millennium  BBB .20  DDD .10       .30
+    Point72     CCC .65                .65
+Expected active overlap (weighted Jaccard of overweights)
+    Citadel-Millennium .2 / (.3 + .3 - .2) = .50; pairs with Point72 = 0
 
 Expected 2026 weights
     Citadel     AAA .50  BBB .50
@@ -113,6 +123,7 @@ def write_sample(raw: Path) -> Path:
             ["0003-26-000002", "25-AUG-2026", "13F-HR/A", "0000000003", "30-JUN-2026"],
             ["0004-26-000001", "12-AUG-2026", "13F-NT", "0000000004", "30-JUN-2026"],
             ["0005-26-000001", "13-AUG-2026", "13F-HR", "0000000005", "30-JUN-2026"],
+            ["0006-26-000001", "14-AUG-2026", "13F-HR", "0000000006", "30-JUN-2026"],
         ],
         covs=[
             ["0001-26-000001", "30-JUN-2026", "N", None, None, "CITADEL ADVISORS LLC", HOLD],
@@ -122,6 +133,7 @@ def write_sample(raw: Path) -> Path:
             ["0003-26-000002", "30-JUN-2026", "Y", 1, "NEW HOLDINGS", "MILLENNIUM MANAGEMENT LLC", HOLD],
             ["0004-26-000001", "30-JUN-2026", "N", None, None, "SOME NOTICE FILER LLC", "13F NOTICE"],
             ["0005-26-000001", "30-JUN-2026", "N", None, None, "VANGUARD GROUP INC", HOLD],
+            ["0006-26-000001", "30-JUN-2026", "N", None, None, "BAD UNITS CAPITAL LLC", HOLD],
         ],
         infos=[
             _info("0001-26-000001", 1, "AAA", 500, 5, figi=F),
@@ -136,7 +148,11 @@ def write_sample(raw: Path) -> Path:
             _info("0003-26-000001", 1, "AAA", 400, 4, figi=F),
             _info("0003-26-000001", 2, "BBB", 400, 4, figi=F),
             _info("0003-26-000002", 1, "DDD", 200, 2, figi=F),
-            _info("0005-26-000001", 1, "AAA", 9999999, 99999, figi=F),
+            _info("0005-26-000001", 1, "AAA", 4850, 48, figi=F),
+            _info("0005-26-000001", 2, "BBB", 1100, 11, figi=F),
+            _info("0005-26-000001", 3, "CCC", 250, 2, figi=F),
+            _info("0005-26-000001", 4, "DDD", 800, 8, figi=F),
+            _info("0006-26-000001", 1, "AAA", 500000, 5, figi=F),
         ],
     )
     return raw

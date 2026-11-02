@@ -117,7 +117,7 @@ def built(con, universe_csv):
 def test_universe_matches_names_not_others(built, universe_csv):
     con, matched = built
     assert set(matched.fund) == {"Citadel", "Millennium", "Point72"}
-    assert "5" not in set(matched.cik)  # Vanguard is not in the universe
+    assert not {"5", "6"} & set(matched.cik)  # Vanguard and Bad Units are not in the universe
     assert metrics.unmatched_patterns(con, universe_csv) == ["Ghost Fund"]
 
 
@@ -142,16 +142,19 @@ def test_overlap_by_hand(built):
     assert idx == pytest.approx(1.30 / 3)
 
 
-def test_share_classes_merge_but_etf_trusts_do_not(built):
+def test_share_classes_merge_and_etfs_are_excluded(built):
     con, _ = built
-    # Q3 2022: Citadel AAA $5k + AAA class B $5k + ETF2 $1k; Millennium AAA $7k + ETF1 $1k.
-    # Correct: AAA weights 10/11 and 7/8, ETFs differ  -> overlap 0.875
-    # Classes not merged                               -> 0.4545
-    # ETFs wrongly merged                              -> 0.966
+    # Q3 2022: Citadel AAA $5k + AAA class B $5k (+ an ETF); Millennium AAA $7k (+ an ETF).
+    # Classes merged and ETFs left out: both funds are 100% AAA -> overlap 1.0.
+    # If classes were not merged, Citadel would be half AAA, half AAA_B -> 0.5.
     row = con.execute(
         "SELECT overlap FROM fund_overlap WHERE period = DATE '2022-09-30'"
     ).fetchall()[0]
-    assert row[0] == pytest.approx(0.875)
+    assert row[0] == pytest.approx(1.0)
+    etfs = con.execute(
+        "SELECT cusip, n_holders FROM etf_holdings WHERE period = DATE '2022-09-30' ORDER BY cusip"
+    ).fetchall()
+    assert etfs == [(CUSIP["ETF2"], 1), (CUSIP["ETF1"], 1)]  # two ETFs, kept apart
 
 
 def test_issuer_key(con):
@@ -162,6 +165,72 @@ def test_issuer_key(con):
     assert con.execute(q, ["464287655", "ISHARES TR"]).fetchall()[0][0] == "464287655"
     assert con.execute(q, ["81369Y803", "SELECT SECTOR SPDR TR"]).fetchall()[0][0] == "81369Y803"
     assert con.execute(q, ["78462F103", "SPDR S&P 500 ETF TR"]).fetchall()[0][0] == "78462F103"
+
+
+@pytest.mark.parametrize(
+    "issuer,title,expected",
+    [
+        ("ISHARES TR", "CORE S&P500 ETF", True),
+        ("SPDR S&P 500 ETF TR", "TR UNIT", True),
+        ("INVESCO QQQ TR", "UNIT SER 1", True),
+        ("SELECT SECTOR SPDR TR", "TECHNOLOGY", True),
+        ("VANGUARD INDEX FDS", "S&P 500 ETF SHS", True),
+        ("ALPHABET INC", "CAP STK CL C", False),
+        ("NORTHERN TR CORP", "COM", False),
+        ("VORNADO RLTY TR", "SH BEN INT", False),
+        ("VISA INC", "COM CL A", False),
+    ],
+)
+def test_is_fund_product(con, issuer, title, expected):
+    metrics.create_macros(con)
+    assert con.execute("SELECT is_fund_product(?, ?)", [issuer, title]).fetchall()[0][0] is expected
+
+
+def test_unit_errors_dropped(built):
+    con, _ = built
+    assert con.execute("SELECT count(*) FROM holdings WHERE cik = '6'").fetchall()[0][0] == 1
+    assert con.execute("SELECT count(*) FROM holdings_ok WHERE cik = '6'").fetchall()[0][0] == 0
+
+
+def test_market_weights_and_active_share(built):
+    con, _ = built
+    mw = dict(con.execute(
+        "SELECT issuer_id, market_weight FROM market_weights WHERE period = DATE '2026-06-30'"
+    ).fetchall())
+    assert mw == pytest.approx({"11111A": 0.6, "22222B": 0.2, "33333C": 0.1, "44444D": 0.1})
+    act = dict(con.execute(
+        "SELECT fund, active_share FROM fund_stats WHERE period = DATE '2026-06-30'"
+    ).fetchall())
+    assert act == pytest.approx({"Citadel": 0.30, "Millennium": 0.30, "Point72": 0.65})
+
+
+def test_active_overlap_by_hand(built):
+    con, _ = built
+    m = metrics.overlap_matrix(con, "2026-06-30", column="active_overlap")
+    assert m.loc["Citadel", "Millennium"] == pytest.approx(0.50)
+    assert m.loc["Citadel", "Point72"] == pytest.approx(0.0)
+    assert m.loc["Millennium", "Point72"] == pytest.approx(0.0)
+
+
+def test_index_change_uses_only_pairs_in_both_quarters(con):
+    con.execute(
+        """CREATE TABLE fund_overlap AS SELECT * FROM (VALUES
+             (DATE '2026-03-31', 'A', 'B', 0.30, 0.10, 5),
+             (DATE '2026-03-31', 'A', 'C', 0.10, 0.00, 1),
+             (DATE '2026-03-31', 'B', 'C', 0.10, 0.00, 1),
+             (DATE '2026-06-30', 'A', 'B', 0.40, 0.20, 5)
+           ) t(period, fund_a, fund_b, overlap, active_overlap, shared_stocks)"""
+    ).fetchall()
+    metrics.build_crowding_index(con)
+    rows = dict(
+        (str(r[0]), r[1:]) for r in con.execute(
+            "SELECT period, crowding_index, change_same_funds, n_pairs_compared FROM crowding_index"
+        ).fetchall()
+    )
+    # Fund C left. The plain average jumps from 0.167 to 0.40, but the
+    # like-for-like change is only A-B: 0.40 - 0.30 = 0.10.
+    assert rows["2026-06-30"] == (pytest.approx(0.40), pytest.approx(0.10), 1)
+    assert rows["2026-03-31"][1] is None
 
 
 def test_stock_crowding(built):
@@ -231,5 +300,9 @@ def test_cli_end_to_end(raw_dir, universe_csv, tmp_path, monkeypatch, capsys):
     main(["report", "--period", "2026-06-30", "--top", "5"])
     out = capsys.readouterr().out
     assert "Ghost Fund" in out
-    assert (data / "out" / "dashboard_2026-06-30.json").exists()
+    import json
+
+    dash = json.loads((data / "out" / "dashboard_2026-06-30.json").read_text())  # strict JSON
+    assert dash["top_pairs"][0]["active_overlap"] == pytest.approx(0.5)
+    assert dash["crowding_index"][0]["active_index"] is None  # 2022 has no active bets
     assert (data / "out" / "overlap_matrix_2026-06-30.csv").exists()

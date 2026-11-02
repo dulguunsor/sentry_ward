@@ -16,9 +16,18 @@ For each quarter:
 
 - **Most crowded stocks**: how many funds in the universe hold each stock, how much
   of their portfolios it takes up, and a 0 to 100 crowding score.
-- **Fund-to-fund overlap**: the share of two portfolios that is identical
-  (0 = nothing in common, 1 = the same portfolio).
-- **Crowding index**: the average overlap across all fund pairs, tracked over time.
+- **Fund-to-fund overlap**, two ways:
+  - *Raw overlap*: the share of two portfolios that is identical (0 = nothing in
+    common, 1 = the same portfolio). Big diversified funds score high partly just
+    because both look like the market.
+  - *Active overlap*: of the bets each fund makes beyond the market, how much is the
+    same bet. This is the number that shows real crowding.
+- **Active share per fund**: how far each fund is from simply holding the market.
+- **Crowding index**: the average overlap across fund pairs each quarter, plus the
+  change measured only on pairs present in both quarters, so a fund joining or
+  leaving does not move the index by itself.
+- **ETFs** are listed separately and kept out of all scores, since funds mostly hold
+  them as hedges.
 
 Results are printed and written to `data/out/` as CSV and JSON.
 
@@ -76,12 +85,23 @@ $env:SEC_USER_AGENT = "Your Name your.email@example.com"
    and C) are combined using the first 6 characters of the CUSIP, which identify the
    issuer. Fund trusts such as iShares or SPDR are not combined, because one trust
    code covers many different ETFs.
-7. **One fund, many filers.** Filers matching the same name in `universe.csv` are
+7. **Unit errors are dropped.** Some filers report values 1,000 times too big or
+   too small. A row is dropped when its price per share (value / shares) is more
+   than 10x away from the median every filer reported for that stock that quarter.
+   `ward build` prints how many rows this removed.
+8. **ETFs are separated.** Identified by sponsor names (iShares, SPDR, Invesco
+   QQQ, ProShares and others) and words like ETF or INDEX in the title of class.
+   Companies with "Trust" in their name, such as Northern Trust, are not flagged.
+9. **One fund, many filers.** Filers matching the same name in `universe.csv` are
    combined, so a fund is never compared with itself.
 
 ## Metric definitions
 
-- `weight`: position value / fund's total 13F value that quarter
+- `weight`: position value / fund's total stock value that quarter (ETFs excluded)
+- `market_weight`: the stock's share of all 13F filers' combined stock holdings, used
+  as the "no view" baseline
+- `overweight`: max(weight - market_weight, 0)
+- `active_share`: sum of a fund's overweights (0 = holds the market)
 - `holder_share`: funds holding the stock / funds in the universe
 - `sum_weight`: sum of all funds' weights in the stock
 - `hf_ownership`: shares held by the universe / shares outstanding (needs market data)
@@ -92,7 +112,10 @@ $env:SEC_USER_AGENT = "Your Name your.email@example.com"
   `days_to_exit` use percentile ranks because they have extreme outliers.
 - `crowding_rank`: position in the quarter's list, 1 = most crowded
 - `overlap(A, B)`: sum over stocks of min(weight_A, weight_B)
-- `crowding_index`: average overlap across all fund pairs
+- `active_overlap(A, B)`: sum of min(overweight_A, overweight_B) divided by sum of
+  max(overweight_A, overweight_B). 0 = no shared bets, 1 = identical bets
+- `crowding_index` / `active_index`: average raw / active overlap across fund pairs
+- `raw_change` / `active_change`: average change over pairs present in both quarters
 
 ## Fund universe
 

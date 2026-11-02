@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 import duckdb
+import pandas as pd
 
 from . import clean, config, metrics, sec13f
 
@@ -41,13 +42,31 @@ def cmd_load(args, paths):
 
 def cmd_build(args, paths):
     con = _connect(paths)
+    print("Building metrics (on full 13F data this takes a few minutes)...")
     matched = metrics.build_all(con, Path(args.universe), min_holders=args.min_holders)
+    c = matched.attrs["checks"]
+    print(f"Unit check: dropped {c['dropped']:,} of {c['rows']:,} holdings rows "
+          f"({c['dropped'] / max(c['rows'], 1):.2%}) whose price was over 10x off the median.")
     print(f"Universe: {matched.fund.nunique()} funds from {len(matched)} filer CIKs")
     print(matched[["fund", "cik", "manager_name"]].to_string(index=False))
     missing = metrics.unmatched_patterns(con, Path(args.universe))
     if missing:
         print("\nNo filer matched these names (check the pattern in the universe file):")
         print("  " + ", ".join(missing))
+
+
+def _records(df):
+    """Rows as dicts with missing values as None, so the JSON stays valid."""
+    return df.astype(object).where(df.notna(), None).to_dict(orient="records")
+
+
+def _matrix(m):
+    rows = [[None if pd.isna(x) else round(float(x), 4) for x in row] for row in m.values]
+    return {"funds": list(m.index), "values": rows}
+
+
+def _fmt(df):
+    return df.to_string(index=False) if len(df) else "  (none)"
 
 
 def cmd_report(args, paths):
@@ -64,37 +83,74 @@ def cmd_report(args, paths):
         """,
         [period, args.top],
     ).df()
-    idx = con.execute("SELECT * FROM crowding_index ORDER BY period").df()
+    etfs = con.execute(
+        """
+        SELECT cusip, left(issuer, 28) AS issuer, left(coalesce(title_of_class, ''), 24) AS class,
+               n_holders AS holders, round(total_value_usd / 1e9, 2) AS value_bn
+        FROM etf_holdings WHERE period = ?::DATE
+        ORDER BY n_holders DESC, total_value_usd DESC LIMIT 10
+        """,
+        [period],
+    ).df()
+    funds = con.execute(
+        """
+        SELECT fund, n_stocks AS stocks, round(total_value_usd / 1e9, 1) AS value_bn,
+               round(etf_share, 3) AS etf_share, round(active_share, 3) AS active_share
+        FROM fund_stats WHERE period = ?::DATE ORDER BY active_share
+        """,
+        [period],
+    ).df()
+    idx = con.execute(
+        """
+        SELECT period, round(crowding_index, 4) AS raw_index, round(active_index, 4) AS active_index,
+               n_pairs, round(change_same_funds, 4) AS raw_change, round(active_change_same_funds, 4)
+               AS active_change, n_pairs_compared AS compared
+        FROM crowding_index ORDER BY period
+        """
+    ).df()
     matrix = metrics.overlap_matrix(con, period)
+    active_matrix = metrics.overlap_matrix(con, period, column="active_overlap")
     pairs = metrics.top_pairs(con, period)
     missing = metrics.missing_funds(con, period)
 
     print(f"\nQuarter ending {period}: {len(matrix)} funds reporting")
     if missing:
         print(f"No 13F holdings report this quarter: {', '.join(missing)}")
-    print(top.to_string(index=False))
-    print("\nMost similar fund pairs (share of portfolio in common):")
-    print(pairs.to_string(index=False))
-    print("\nCrowding index by quarter (average pairwise overlap):")
-    print(idx.tail(8).to_string(index=False))
+    print("\nMost crowded stocks (ETFs excluded):")
+    print(_fmt(top))
+    print("\nMost similar fund pairs, by active overlap (shared bets beyond the market):")
+    print(_fmt(pairs))
+    print("\nFunds, from most index-like to least (active share 0 = holds the market):")
+    print(_fmt(funds))
+    print("\nETFs held most widely (kept out of the scores above):")
+    print(_fmt(etfs))
+    print("\nCrowding index by quarter. Change columns compare only fund pairs present in both quarters:")
+    print(_fmt(idx.tail(8)))
 
     out = paths.out
     top.to_csv(out / f"top_crowded_{period}.csv", index=False)
     idx.to_csv(out / "crowding_index.csv", index=False)
     matrix.to_csv(out / f"overlap_matrix_{period}.csv")
+    active_matrix.to_csv(out / f"active_overlap_matrix_{period}.csv")
     pairs.to_csv(out / f"top_pairs_{period}.csv", index=False)
+    funds.to_csv(out / f"funds_{period}.csv", index=False)
+    etfs.to_csv(out / f"etfs_{period}.csv", index=False)
     with open(out / f"dashboard_{period}.json", "w") as fh:
         json.dump(
             {
                 "period": period,
                 "missing_funds": missing,
-                "top_crowded": top.to_dict(orient="records"),
-                "top_pairs": pairs.to_dict(orient="records"),
-                "crowding_index": idx.assign(period=idx.period.astype(str)).to_dict(orient="records"),
-                "overlap_matrix": {"funds": list(matrix.index), "values": matrix.round(4).values.tolist()},
+                "top_crowded": _records(top),
+                "top_pairs": _records(pairs),
+                "funds": _records(funds),
+                "etfs": _records(etfs),
+                "crowding_index": _records(idx.assign(period=idx.period.astype(str))),
+                "overlap_matrix": _matrix(matrix),
+                "active_overlap_matrix": _matrix(active_matrix),
             },
             fh,
             indent=2,
+            allow_nan=False,
             default=float,
         )
     print(f"\nWrote CSV and JSON to {out}")
