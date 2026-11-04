@@ -100,3 +100,45 @@ describe("pages", () => {
     expect(parseRoute("#/fund/%E0%A4%A")).toEqual({ page: "fund", key: "%E0%A4%A" });
   });
 });
+
+import { newsByTicker, newsMarks, normTicker, nyTime, youtubeEmbed } from "./lib.js";
+
+describe("live news and video", () => {
+  it("reads YouTube links", () => {
+    expect(youtubeEmbed("https://www.youtube.com/watch?v=abcDEF12345&t=3")).toBe("https://www.youtube.com/embed/abcDEF12345?autoplay=1&mute=1&playsinline=1");
+    expect(youtubeEmbed("https://youtu.be/abcDEF12345")).toContain("/embed/abcDEF12345?");
+    expect(youtubeEmbed("https://www.youtube.com/live/abcDEF12345?si=x")).toContain("/embed/abcDEF12345?");
+    expect(youtubeEmbed("abcDEF12345")).toContain("/embed/abcDEF12345?");
+    expect(youtubeEmbed("https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv")).toContain("live_stream?channel=UCabcdefghijklmnopqrstuv");
+    expect(youtubeEmbed("https://example.com/video")).toBe(null);
+    expect(youtubeEmbed("")).toBe(null);
+  });
+  it("matches tickers across sources", () => {
+    expect(normTicker("BRK.B")).toBe(normTicker("BRK-B"));
+    expect(normTicker("brk/b")).toBe("BRKB");
+  });
+  it("shows New York time and groups recent news", () => {
+    expect(nyTime("2026-04-10T14:05:09Z")).toBe("10:05");
+    expect(nyTime("2026-04-10T14:05:09Z", true)).toBe("10:05:09");
+    const now = Date.parse("2026-04-10T16:00:00Z");
+    const items = [
+      { id: 1, created_at: "2026-04-10T15:00:00Z", tracked: ["BRK-B"] },
+      { id: 2, created_at: "2026-04-10T10:00:00Z", tracked: ["BRK-B"] },
+      { id: 3, created_at: "2026-04-10T15:30:00Z", tracked: [] },
+    ];
+    const g = newsByTicker(items, now);
+    expect(Object.keys(g)).toEqual(["BRKB"]);
+    expect(g.BRKB.map((n) => n.id)).toEqual([1]);
+  });
+  it("places headlines on the intraday chart", () => {
+    const path = [{ t: "09:30" }, { t: "09:35" }, { t: "09:40" }];
+    const items = [
+      { id: 1, created_at: "2026-04-10T13:37:00Z", tracked: ["A"] },   // 09:37 NY -> bar 09:35
+      { id: 2, created_at: "2026-04-10T13:20:00Z", tracked: ["A"] },   // before the open
+      { id: 3, created_at: "2026-04-09T13:37:00Z", tracked: ["A"] },   // yesterday
+      { id: 4, created_at: "2026-04-10T13:41:00Z", tracked: [] },      // not a tracked stock
+    ];
+    expect(newsMarks(path, items, "2026-04-10T10:00:00-04:00")).toEqual([{ i: 1, items: [items[0]] }]);
+    expect(newsMarks([{ t: "Apr 10" }], items, "2026-04-10")).toEqual([]);
+  });
+});

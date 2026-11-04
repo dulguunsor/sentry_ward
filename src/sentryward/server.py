@@ -4,6 +4,7 @@
   /dashboard    the full dashboard, rendered once at start-up
   /api/meta     baskets, history and alert settings (does not change while running)
   /api/live     the latest snapshot and when it was taken
+  /api/stream   the same, pushed to the browser every second (server-sent events)
   /api/search   ?q= stocks and funds matching a ticker or name
   /api/stock/K  one stock (ticker or issuer key): crowding history and holders
   /api/fund/N   one fund: holdings, changes since its previous filing, closest funds
@@ -11,6 +12,8 @@
 
 from __future__ import annotations
 
+import json
+import time
 from importlib import resources
 from pathlib import Path
 
@@ -59,6 +62,27 @@ def create_app(monitor: LiveMonitor, meta: dict, dashboard_html: str | None = No
     @app.get("/api/meta")
     def api_meta():
         return jsonify(meta)
+
+    @app.get("/api/stream")
+    def api_stream():
+        every = max(0.5, float(request.args.get("every", 1)))
+
+        def events():
+            last = None
+            quiet = 0.0
+            while True:
+                body = json.dumps(monitor.state(), allow_nan=False, separators=(",", ":"))
+                if body != last:
+                    yield f"data: {body}\n\n"
+                    last, quiet = body, 0.0
+                elif quiet >= 15:
+                    yield ": keep-alive\n\n"  # stops proxies and browsers from closing an idle stream
+                    quiet = 0.0
+                time.sleep(every)
+                quiet += every
+
+        return Response(events(), mimetype="text/event-stream",
+                        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
     @app.get("/api/live")
     def api_live():

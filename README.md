@@ -129,6 +129,31 @@ How it works:
 - The stress test did not find that crowded stocks fall harder in most sell-offs, so a
   warning is a reason to look closer, not a forecast.
 
+### Real-time prices, live news and live TV
+
+With a free [Alpaca](https://alpaca.markets) account (a paper trading account is enough),
+`ward live` switches from delayed quotes to real-time ones:
+
+| Variable | What it turns on |
+|---|---|
+| `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY` | Prices every second and a live news feed |
+| `ANTHROPIC_API_KEY` (optional) | One or two sentence summaries for headlines that arrive without one |
+
+- **Prices** update every second during market hours (9:30 to 16:00 New York time). The
+  server pushes each update to the browser, so the numbers, chart and table move on
+  their own. Outside market hours, or without keys, it uses Yahoo's delayed quotes.
+- **The free plan's prices come from one exchange, IEX.** They are real trades in real
+  time, but IEX handles a small share of US volume, so a quiet stock can go a while
+  between trades. The table marks any stock whose last trade is more than a minute old.
+  The basket averages smooth most of this out.
+- **News** arrives over a streaming connection seconds after publication. The panel
+  shows the headline, a short summary and a link, never the article text. Headlines about
+  tracked stocks are highlighted, flagged in the table (**N**) and marked on the
+  intraday chart. A headline next to a price move may or may not be its cause.
+- **Live TV:** paste a news channel's YouTube live link into the panel. It plays through
+  YouTube's own player, muted at first, and the choice is remembered in your browser.
+- Options: `--source auto|alpaca|yahoo` (default `auto`) and `--tick SECONDS` (default 1).
+
 Stock and fund pages:
 
 - **Search** in the menu bar finds a stock by ticker, company name or CUSIP, and a fund by name.
@@ -142,6 +167,8 @@ Stock and fund pages:
 
 | Part | Built with | Where |
 |---|---|---|
+| Real-time prices, news feed, summaries | Python, Alpaca REST and WebSocket APIs, Claude API | `src/sentryward/realtime.py` |
+| Push to the browser (`/api/stream`) | Flask, server-sent events | `src/sentryward/server.py` |
 | Baskets, history, snapshot | Python, DuckDB | `src/sentryward/live.py` |
 | API (`/api/live`, `/api/meta`, `/api/search`, `/api/stock/<key>`, `/api/fund/<name>`) | Flask | `src/sentryward/server.py` |
 | Search, stock and fund look-ups | Python, DuckDB SQL | `src/sentryward/explore.py` |
@@ -322,6 +349,7 @@ sample funds have overlaps of 0.80, 0.25 and 0.25, so the crowding index must be
 - [x] Dashboard (`ward dashboard`)
 - [x] Live view with delayed quotes (`ward live`)
 - [x] Stock and fund pages with search
+- [x] Real-time prices (IEX), live news with summaries, live TV panel
 - [x] Docker image and pipeline script
 
 ## Contributing

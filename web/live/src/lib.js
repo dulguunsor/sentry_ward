@@ -101,3 +101,59 @@ export function parseRoute(hash) {
 
 export const stockHref = (key) => `#/stock/${encodeURIComponent(key)}`;
 export const fundHref = (name) => `#/fund/${encodeURIComponent(name)}`;
+
+/** "BRK.B", "brk-b" and "BRK/B" all become "BRKB", so tickers from different sources match. */
+export const normTicker = (t) => (t || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+/** A pasted YouTube link (video, live, short link or channel) -> an embed URL, or null. */
+export function youtubeEmbed(input) {
+  const s = (input || "").trim();
+  if (!s) return null;
+  const opts = "autoplay=1&mute=1&playsinline=1";
+  const channel = /youtube\.com\/channel\/(UC[\w-]{22})/.exec(s) || /^(UC[\w-]{22})$/.exec(s);
+  if (channel) return `https://www.youtube.com/embed/live_stream?channel=${channel[1]}&${opts}`;
+  const id = /(?:v=|youtu\.be\/|\/live\/|\/embed\/|\/shorts\/)([\w-]{11})(?![\w-])/.exec(s) || /^([\w-]{11})$/.exec(s);
+  return id ? `https://www.youtube.com/embed/${id[1]}?${opts}` : null;
+}
+
+/** "2026-04-10T14:05:00Z" -> "10:05" in New York time. */
+export function nyTime(iso, seconds = false) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "--:--";
+  return d.toLocaleTimeString("en-GB", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit",
+    ...(seconds ? { second: "2-digit" } : {}) });
+}
+
+/** Tracked headlines from the last `hours`, grouped by normalized ticker. */
+export function newsByTicker(items, nowMs, hours = 3) {
+  const out = {};
+  for (const n of items || []) {
+    const t = Date.parse(n.created_at);
+    if (!(nowMs - t <= hours * 3600e3)) continue;
+    for (const s of n.tracked || []) (out[normTicker(s)] ||= []).push(n);
+  }
+  return out;
+}
+
+/**
+ * Where tracked headlines fall on an intraday path labelled "HH:MM": each headline goes to the
+ * last bar at or before its New York time. Paths with other labels (5D, daily) get no marks.
+ */
+export function newsMarks(path, items, todayIso) {
+  if (!path?.length || !/^\d\d:\d\d$/.test(path[0].t)) return [];
+  const day = todayIso?.slice(0, 10);
+  const marks = new Map();
+  for (const n of items || []) {
+    if (!n.tracked?.length) continue;
+    const d = new Date(n.created_at);
+    const nyDay = d.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    if (day && nyDay !== day) continue;
+    const hm = nyTime(n.created_at);
+    let i = -1;
+    for (let k = 0; k < path.length; k++) if (path[k].t.slice(0, 5) <= hm) i = k;
+    if (i < 0) continue;
+    if (!marks.has(i)) marks.set(i, []);
+    marks.get(i).push(n);
+  }
+  return [...marks].map(([i, items]) => ({ i, items }));
+}

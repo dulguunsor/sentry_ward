@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { HistoryChart, PathChart } from "./charts.jsx";
-import { RANGE_KEYS, freshness, hhmm, isNum, parseRoute, pct, pickRange, stockHref, zLevel } from "./lib.js";
+import { RANGE_KEYS, freshness, hhmm, isNum, newsByTicker, newsMarks, normTicker, nyTime, parseRoute, pct, pickRange, stockHref, zLevel } from "./lib.js";
+import { NewsPanel, VideoPanel } from "./news.jsx";
 import { FundPage, SearchBox, StockPage } from "./pages.jsx";
 
 const POLL_MS = 15000;
@@ -15,15 +16,26 @@ function useApi() {
     fetch("/api/meta").then((r) => r.json()).then(setMeta).catch(() => setFailed(true));
   }, []);
   useEffect(() => {
-    let alive = true;
+    // The server pushes the state every second (server-sent events). If the stream can't be
+    // opened at all, fall back to asking every 15 seconds.
+    let alive = true, poll = null, es = null, opened = false;
+    const got = (s) => { if (alive) { setState(s); setFailed(false); setNow(Date.now()); } };
     const load = () =>
-      fetch("/api/live", { cache: "no-store" })
-        .then((r) => r.json())
-        .then((s) => { if (alive) { setState(s); setFailed(false); setNow(Date.now()); } })
+      fetch("/api/live", { cache: "no-store" }).then((r) => r.json()).then(got)
         .catch(() => { if (alive) { setFailed(true); setNow(Date.now()); } });
-    load();
-    const id = setInterval(load, POLL_MS);
-    return () => { alive = false; clearInterval(id); };
+    const startPolling = () => { if (!poll) { load(); poll = setInterval(load, POLL_MS); } };
+    if (typeof EventSource === "undefined") startPolling();
+    else {
+      es = new EventSource("/api/stream");
+      es.onopen = () => { opened = true; };
+      es.onmessage = (e) => { try { got(JSON.parse(e.data)); } catch { /* ignore a bad frame */ } };
+      es.onerror = () => {
+        if (!opened) { es.close(); startPolling(); }
+        else if (alive) { setFailed(true); setNow(Date.now()); }   // the browser reconnects by itself
+      };
+    }
+    const tick = setInterval(() => alive && setNow(Date.now()), 5000);
+    return () => { alive = false; es?.close(); clearInterval(poll); clearInterval(tick); };
   }, []);
   return { meta, state, failed, now };
 }
@@ -80,11 +92,14 @@ function Banner({ snap, alertZ }) {
   );
 }
 
-function StockDetail({ s, range }) {
+function StockDetail({ s, range, news = {} }) {
   if (!s) return <div className="detail dim">Hover a row to see the stock's matched peers.</div>;
   return (
     <div className="detail">
       <div><a className="tk" href={stockHref(s.ticker)}>{s.ticker}</a> <span className="dim">{s.issuer || ""}</span> <span className="faint">· click for its page</span></div>
+      {(news[normTicker(s.symbol || s.ticker)] || []).slice(0, 2).map((n) => (
+        <div key={n.id} className="dnews"><span className="or">{nyTime(n.created_at)}</span> {n.headline} <span className="faint">(possibly related)</span></div>
+      ))}
       <div className="dim">
         Crowding score {isNum(s.score) ? s.score.toFixed(0) : "--"} · beta {isNum(s.beta) ? s.beta.toFixed(2) : "--"} ·
         {" "}{range}: <b className={signCls(s.ret)}>{pct(s.ret)}</b>, peers <b className={signCls(s.peers_ret)}>{pct(s.peers_ret)}</b>
@@ -99,7 +114,21 @@ function StockDetail({ s, range }) {
   );
 }
 
-function BasketTable({ stocks, range }) {
+function Flags({ s, news }) {
+  const items = news[normTicker(s.symbol || s.ticker)] || [];
+  return <>
+    {items.length > 0 && (
+      <span className="flag news" title={items.slice(0, 3).map((n) => `${nyTime(n.created_at)} ${n.headline}`).join("\n")}>N</span>
+    )}
+    {isNum(s.age) && s.age > 60 && (
+      <span className="flag stale" title={`Last real-time trade ${Math.round(s.age / 60)} min ago (IEX). The price may be behind.`}>
+        {s.age >= 3600 ? `${Math.floor(s.age / 3600)}h` : `${Math.round(s.age / 60)}m`}
+      </span>
+    )}
+  </>;
+}
+
+function BasketTable({ stocks, range, news = {} }) {
   const rows = useMemo(() => [...stocks].sort((a, b) => (a.rel ?? 1) - (b.rel ?? 1)), [stocks]);
   const max = Math.max(0.01, ...rows.map((r) => Math.abs(r.rel ?? 0)));
   const [hot, setHot] = useState(null);
@@ -120,7 +149,7 @@ function BasketTable({ stocks, range }) {
         {rows.map((s) => (
           <tr key={s.ticker} className={hot === s.ticker ? "hot" : ""} tabIndex={0}
             onMouseEnter={() => setHot(s.ticker)} onFocus={() => setHot(s.ticker)}>
-            <td className="l" title={s.issuer || ""}><a className="tk" href={stockHref(s.ticker)}>{s.ticker}</a></td>
+            <td className="l nowrap" title={s.issuer || ""}><a className="tk" href={stockHref(s.ticker)}>{s.ticker}</a><Flags s={s} news={news} /></td>
             <td>{isNum(s.score) ? s.score.toFixed(0) : "--"}</td>
             <td className={signCls(s.ret)}>{pct(s.ret)}</td>
             <td className={signCls(s.peers_ret)}>{pct(s.peers_ret)}</td>
@@ -135,7 +164,7 @@ function BasketTable({ stocks, range }) {
       </tbody>
     </table>
       </div>
-      <StockDetail s={shown} range={range} />
+      <StockDetail s={shown} range={range} news={news} />
     </>
   );
 }
@@ -152,6 +181,12 @@ export default function App() {
   const range = pickRange(wanted, available);
   const view = ok ? snap.ranges?.[range] : null;
   const choose = (k) => { setWanted(k); saveRange(k); };
+  const rt = state?.source === "iex";
+  const newsItems = state?.news?.items || [];
+  // "Recent" is measured from the time of the latest prices, so it also works when quotes are delayed.
+  const refMs = Date.parse(snap?.as_of) || now;
+  const recent = useMemo(() => newsByTicker(newsItems, refMs), [newsItems, refMs]);
+  const marks = useMemo(() => (view ? newsMarks(view.path, newsItems, snap?.as_of) : []), [view, newsItems, snap?.as_of]);
 
   return (
     <>
@@ -159,9 +194,14 @@ export default function App() {
         <span className="brand"><b>SENTRY</b> <i>WARD</i></span>
         <span className="dim">13F CROWDING RESEARCH</span>
         <span className={`dot ${fresh}`}>{{ live: "LIVE", stale: "STALE", offline: "OFFLINE" }[fresh]}</span>
-        <span className="dim">{ok ? `SESSION ${snap.session} · ${hhmm(snap.as_of)} ET` : "WAITING FOR QUOTES"}</span>
+        <span className="dim">{ok ? `SESSION ${snap.session} · ${rt ? nyTime(snap.as_of, true) : hhmm(snap.as_of)} ET` : "WAITING FOR QUOTES"}</span>
         <span className="push"><SearchBox /></span>
-        <span className="or outline" title="Quotes from Yahoo Finance arrive about 15 minutes late. Yahoo's smallest bar is 1 minute.">DELAYED ~15 MIN</span>
+        {rt
+          ? <span className="up outline" title="Real-time trades from the IEX exchange through Alpaca, updated every second. IEX is one exchange, so a quiet stock can go a while between trades.">IEX REAL TIME</span>
+          : <span className="or outline" title={state?.realtime && !state.realtime.market_open
+              ? "Market closed. Real-time prices resume at 9:30 New York time; until then quotes come from Yahoo Finance."
+              : "Quotes from Yahoo Finance arrive about 15 minutes late. Set Alpaca keys for real-time prices."}>
+              {state?.realtime && !state.realtime.market_open ? "MARKET CLOSED" : "DELAYED ~15 MIN"}</span>}
       </header>
       <nav className="tabs" aria-label="Screens">
         <a href="#/" aria-current={route.page === "live" ? "page" : undefined}>LIVE</a>
@@ -215,21 +255,27 @@ export default function App() {
               </div>
               <div className="pb">
                 <div className="since">Return {view?.since} · {view?.bar} · hover the chart for values</div>
-                {view && <PathChart key={range} path={view.path} since={view.since} />}
+                {view && <PathChart key={range} path={view.path} since={view.since} marks={marks} />}
                 <div className="legend">
                   <span><i style={{ background: "#f59e0b" }} />CROWDED</span>
                   <span><i style={{ background: "#0891b2" }} />MATCHED PEERS</span>
                   <span><i style={{ background: "#8a8a8a" }} />SPY</span>
+                  {marks.length > 0 && <span><i className="tri" />NEWS ON A TRACKED STOCK</span>}
                   {view && <span>Coverage: {view.coverage.crowded}/{view.coverage.crowded_total} crowded, {view.coverage.peers}/{view.coverage.peers_total} peers quoted</span>}
                 </div>
               </div>
             </div>
             <div className="panel c-side">
               <div className="ph"><h2>CROWDED VS PEERS · {range}</h2><small>worst first</small></div>
-              <div className="pb">{view && <BasketTable stocks={view.stocks} range={range} />}</div>
+              <div className="pb">{view && <BasketTable stocks={view.stocks} range={range} news={recent} />}</div>
             </div>
           </div>
         )}
+
+        <div className="row">
+          <NewsPanel news={state?.news} />
+          <VideoPanel />
+        </div>
 
         {meta && (
           <div className="panel">
@@ -250,7 +296,7 @@ export default function App() {
       <footer className="status">
         <span>SENTRY WARD LIVE</span>
         <span className="opt">HOLDINGS {meta?.period ?? "--"} · PRICES THROUGH {meta?.prices_through ?? "--"}</span>
-        <span className="opt">UPDATED {state?.last_update ? new Date(state.last_update).toLocaleTimeString() : "--"} · EVERY {state?.interval ?? "--"} S</span>
+        <span className="opt">UPDATED {state?.last_update ? new Date(state.last_update).toLocaleTimeString() : "--"} · EVERY {state?.interval ?? "--"} S{rt ? " · IEX" : ""}</span>
         <span className={`end ${fresh === "live" ? "up" : fresh === "stale" ? "or" : "down"}`}>
           {fresh === "live" ? "READY" : fresh === "stale" ? "STALE" : "OFFLINE"}
         </span>

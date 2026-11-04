@@ -234,12 +234,19 @@ def _window(rows: pd.DataFrame, key: str, base: pd.Series, bar: str | None, fmt:
         pr = [lastrow.get(p) for p in c["peers"]]
         pr = [float(x) for x in pr if x is not None and not pd.isna(x)]
         peer = float(np.mean(pr)) if pr else None
-        stocks.append({"ticker": c["ticker"], "issuer": c["issuer"], "score": c["score"], "beta": c.get("beta"),
+        stocks.append({"ticker": c["ticker"], "symbol": c["symbol"], "issuer": c["issuer"], "score": c["score"],
+                       "beta": c.get("beta"),
                        "peers": [{"ticker": tick.get(p, p), "ret": None if pd.isna(lastrow.get(p, np.nan))
                                   else float(lastrow.get(p))} for p in c["peers"]],
                        "ret": ret, "peers_ret": peer, "rel": None if ret is None or peer is None else ret - peer})
     last = path.iloc[-1]
+    # Kept (not sent to the browser) so per-second prices can update the range without
+    # recomputing it: the price each return is measured from, and the latest price seen.
+    keep = cs_ok + ps_ok + ([stress.BENCHMARK] if stress.BENCHMARK in rets else [])
+    _base = {s: float(base[s]) for s in keep if not pd.isna(base.get(s))}
+    _last = {s: float(wide[s].iloc[-1]) for s in keep if not pd.isna(wide[s].iloc[-1])}
     return {
+        "_base": _base, "_last": _last,
         "bar": BAR_LABEL[bar],
         "crowded": float(last["crowded"]), "peers": float(last["peers"]), "spread": float(last["spread"]),
         "spy": float(last["spy"]) if "spy" in path and not pd.isna(last.get("spy")) else None,
@@ -331,8 +338,15 @@ class LiveMonitor:
 
     def __init__(self, baskets: dict, hist: dict, fetcher: Callable[[list[str]], pd.DataFrame] | None = None,
                  interval: int = 120, daily: pd.DataFrame | None = None,
-                 daily_fetcher: Callable[[list[str]], pd.DataFrame] | None = None, daily_every: int = DAILY_EVERY):
+                 daily_fetcher: Callable[[list[str]], pd.DataFrame] | None = None, daily_every: int = DAILY_EVERY,
+                 prices=None, news=None, clock: Callable[[], float] = time.time):
         self.baskets, self.hist = baskets, hist
+        self.prices = prices        # realtime.PriceFeed, or None for delayed quotes only
+        self.news = news            # realtime.NewsFeed, or None
+        self.clock = clock
+        self._rt_minutes: dict[tuple[str, int], float] = {}
+        if prices is not None:
+            prices.on_update = self._record_prices
         self.fetcher = fetcher or yahoo_intraday
         self.interval = interval
         self.daily = daily                      # starts from the database, then Yahoo replaces it
@@ -359,12 +373,39 @@ class LiveMonitor:
             except Exception:  # daily ranges keep the older data; the intraday view is unaffected
                 pass
         try:
-            snap = snapshot(self.fetcher(self.symbols), self.baskets, self.hist.get("sigma"), self.daily)
+            snap = snapshot(self._with_realtime(self.fetcher(self.symbols)), self.baskets, self.hist.get("sigma"),
+                            self.daily)
             with self._lock:
                 self._latest, self._last_ok, self._error = snap, time.time(), None
         except Exception as e:  # keep serving the last good snapshot
             with self._lock:
                 self._error = f"{type(e).__name__}: {e}"
+
+    # -- real-time prices
+
+    def _record_prices(self) -> None:
+        """Keep the last real-time price in each minute, so the next full refresh can fill
+        the ~15 minutes that delayed bars have not reached yet."""
+        from .realtime import regular_hours
+        for sym, v in self.prices.prices().items():
+            if v.get("ts") and regular_hours(v["ts"]):
+                self._rt_minutes[(sym, int(v["ts"] // 60) * 60)] = v["price"]
+        if len(self._rt_minutes) > 200_000:   # about a day and a half of minutes for 91 stocks
+            for k in sorted(self._rt_minutes, key=lambda k: k[1])[:50_000]:
+                del self._rt_minutes[k]
+
+    def _with_realtime(self, bars: pd.DataFrame) -> pd.DataFrame:
+        if not self._rt_minutes:
+            return bars
+        rt = pd.DataFrame([(s, pd.Timestamp(t, unit="s", tz="UTC"), p) for (s, t), p in list(self._rt_minutes.items())],
+                          columns=["symbol", "ts", "close"])
+        if bars is None or bars.empty:
+            return rt
+        b = bars.copy()
+        b["ts"] = pd.to_datetime(b["ts"], utc=True)
+        last = b.groupby("symbol")["ts"].max()
+        rt = rt[rt["ts"] > rt["symbol"].map(last).fillna(pd.Timestamp(0, tz="UTC"))]
+        return pd.concat([b, rt], ignore_index=True)
 
     def _loop(self) -> None:
         while not self._stop.is_set():
@@ -378,17 +419,40 @@ class LiveMonitor:
 
     def stop(self) -> None:
         self._stop.set()
+        for feed in (self.prices, self.news):
+            if feed is not None:
+                feed.stop()
 
     def state(self) -> dict:
+        from .realtime import merge_tick, regular_hours
         iso = lambda t: datetime.fromtimestamp(t, timezone.utc).isoformat() if t else None  # noqa: E731
+        now = self.clock()
         with self._lock:
-            return clean({
-                "snapshot": self._latest,
-                "last_update": iso(self._last_ok),
-                "last_try": iso(self._last_try),
-                "error": self._error,
-                "interval": self.interval,
-            })
+            snap, last_ok, last_try, error = self._latest, self._last_ok, self._last_try, self._error
+        source, rt_error, rt_ok = "yahoo", None, None
+        if self.prices is not None:
+            rt_error, rt_ok = self.prices.error, self.prices.last_ok
+            if regular_hours(now) and rt_ok and now - rt_ok < 30:
+                try:
+                    snap = merge_tick(snap, self.prices.prices(), self.baskets, self.hist.get("sigma"), now, ALERT_Z)
+                    source = "iex"
+                except Exception as e:  # never let a bad tick break the page
+                    rt_error = f"{type(e).__name__}: {e}"
+        if snap and snap.get("ranges"):
+            snap = {**snap, "ranges": {k: {a: b for a, b in r.items() if not a.startswith("_")}
+                                       for k, r in snap["ranges"].items()}}
+        out = {
+            "snapshot": snap,
+            "last_update": iso(rt_ok if source == "iex" else last_ok),
+            "last_try": iso(last_try),
+            "error": error,
+            "interval": 1 if source == "iex" else self.interval,
+            "source": source,
+            "realtime": None if self.prices is None else {"error": rt_error, "last_ok": iso(rt_ok),
+                                                          "market_open": regular_hours(now)},
+            "news": self.news.state() if self.news is not None else None,
+        }
+        return clean(out)
 
 
 def meta(baskets: dict, hist: dict) -> dict:
