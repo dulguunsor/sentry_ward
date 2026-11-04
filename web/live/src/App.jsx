@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { HistoryChart, PathChart } from "./charts.jsx";
-import { RANGE_KEYS, freshness, hhmm, isNum, newsByTicker, newsMarks, normTicker, nyTime, parseRoute, pct, pickRange, stockHref, zLevel } from "./lib.js";
-import { NewsPanel, VideoPanel } from "./news.jsx";
+import { RANGE_KEYS, freshness, hhmm, isNum, newsByTicker, newsMarks, normTicker, nyTime, parseRoute, pct, pickRange, stockHref, videoTriggers, zLevel } from "./lib.js";
+import { NewsPanel } from "./news.jsx";
+import { TvPanel } from "./tv.jsx";
 import { FundPage, SearchBox, StockPage } from "./pages.jsx";
 
 const POLL_MS = 15000;
@@ -114,6 +115,28 @@ function StockDetail({ s, range, news = {} }) {
   );
 }
 
+/**
+ * A number that flashes light green when it rises and light red when it falls, like a ticking
+ * quote. `id` resets the comparison when the row or the range changes.
+ */
+function Tick({ value, id, bold }) {
+  const prev = useRef({ id, value });
+  const [flash, setFlash] = useState(null);
+  useEffect(() => {
+    const p = prev.current;
+    if (p.id === id && isNum(p.value) && isNum(value) && Math.abs(value - p.value) >= 5e-6) {
+      setFlash({ dir: value > p.value ? "fup" : "fdown", n: (flash?.n || 0) + 1 });
+    }
+    prev.current = { id, value };
+  }, [value, id]);   // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    // A new key restarts the flash on the whole cell each time the value moves.
+    <td key={flash?.n || 0} className={`${signCls(value)} ${flash ? flash.dir : ""}`} style={bold ? { fontWeight: 700 } : undefined}>
+      {pct(value)}{flash && bold && <i className="arrow">{flash.dir === "fup" ? "▲" : "▼"}</i>}
+    </td>
+  );
+}
+
 function Flags({ s, news }) {
   const items = news[normTicker(s.symbol || s.ticker)] || [];
   return <>
@@ -151,9 +174,9 @@ function BasketTable({ stocks, range, news = {} }) {
             onMouseEnter={() => setHot(s.ticker)} onFocus={() => setHot(s.ticker)}>
             <td className="l nowrap" title={s.issuer || ""}><a className="tk" href={stockHref(s.ticker)}>{s.ticker}</a><Flags s={s} news={news} /></td>
             <td>{isNum(s.score) ? s.score.toFixed(0) : "--"}</td>
-            <td className={signCls(s.ret)}>{pct(s.ret)}</td>
-            <td className={signCls(s.peers_ret)}>{pct(s.peers_ret)}</td>
-            <td className={signCls(s.rel)} style={{ fontWeight: 700 }}>{pct(s.rel)}</td>
+            <Tick value={s.ret} id={`${range}${s.ticker}`} />
+            <Tick value={s.peers_ret} id={`${range}${s.ticker}`} />
+            <Tick value={s.rel} id={`${range}${s.ticker}`} bold />
             <td className="l" style={{ minWidth: 40, paddingRight: 4 }}>
               {isNum(s.rel) && <span className="relbar" style={{
                 width: `${Math.round(32 * Math.abs(s.rel) / max)}px`,
@@ -186,12 +209,13 @@ export default function App() {
   // "Recent" is measured from the time of the latest prices, so it also works when quotes are delayed.
   const refMs = Date.parse(snap?.as_of) || now;
   const recent = useMemo(() => newsByTicker(newsItems, refMs), [newsItems, refMs]);
+  const triggers = useMemo(() => videoTriggers(snap?.ranges?.["1D"]?.stocks, recent, refMs), [snap, recent, refMs]);
   const marks = useMemo(() => (view ? newsMarks(view.path, newsItems, snap?.as_of) : []), [view, newsItems, snap?.as_of]);
 
   return (
     <>
       <header className="menubar">
-        <span className="brand"><b>SENTRY</b> <i>WARD</i></span>
+        <span><a className="brand home" href="#/" title="Home"><b>SENTRY</b> <i>WARD</i></a></span>
         <span className="dim">13F CROWDING RESEARCH</span>
         <span className={`dot ${fresh}`}>{{ live: "LIVE", stale: "STALE", offline: "OFFLINE" }[fresh]}</span>
         <span className="dim">{ok ? `SESSION ${snap.session} · ${rt ? nyTime(snap.as_of, true) : hhmm(snap.as_of)} ET` : "WAITING FOR QUOTES"}</span>
@@ -274,7 +298,7 @@ export default function App() {
 
         <div className="row">
           <NewsPanel news={state?.news} />
-          <VideoPanel />
+          <TvPanel triggers={triggers} />
         </div>
 
         {meta && (

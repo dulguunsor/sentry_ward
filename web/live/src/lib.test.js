@@ -142,3 +142,29 @@ describe("live news and video", () => {
     expect(newsMarks([{ t: "Apr 10" }], items, "2026-04-10")).toEqual([]);
   });
 });
+
+import { channelIdOf, playerUrl, videoTriggers } from "./lib.js";
+
+describe("live TV", () => {
+  const UC = "UC" + "a".repeat(22);
+  it("finds channel IDs and builds player links", () => {
+    expect(channelIdOf(`https://www.youtube.com/channel/${UC}/live`)).toBe(UC);
+    expect(channelIdOf("https://www.youtube.com/@name")).toBe(null);
+    expect(playerUrl("https://www.youtube.com/embed/x?autoplay=1", "http://localhost:8765"))
+      .toBe("https://www.youtube.com/embed/x?autoplay=1&enablejsapi=1&origin=http%3A%2F%2Flocalhost%3A8765");
+    expect(playerUrl(null)).toBe(null);
+  });
+  it("only searches when there is news and an unusual move", () => {
+    const now = Date.parse("2026-04-10T16:00:00Z");
+    const news = { NVDA: [{ created_at: "2026-04-10T15:40:00Z", headline: "Nvidia news" }],
+                   AMD: [{ created_at: "2026-04-10T13:00:00Z", headline: "Old" }],
+                   META: [{ created_at: "2026-04-10T15:50:00Z", headline: "Meta news" }] };
+    const stocks = [
+      { ticker: "NVDA", symbol: "NVDA", rel: -0.031 },
+      { ticker: "AMD", symbol: "AMD", rel: -0.05 },     // news too old
+      { ticker: "META", symbol: "META", rel: 0.004 },   // move too small
+      { ticker: "INTC", symbol: "INTC", rel: -0.06 },   // no news
+    ];
+    expect(videoTriggers(stocks, news, now)).toEqual([{ ticker: "NVDA", issuer: undefined, rel: -0.031, headline: "Nvidia news" }]);
+  });
+});

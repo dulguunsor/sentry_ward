@@ -141,6 +141,11 @@ def test_flask_api(market, monkeypatch, tmp_path):
     assert r.headers["Cache-Control"] == "no-store"
     assert r.get_json()["snapshot"]["alert"] is True
     assert c.get("/dashboard").get_data(as_text=True) == "<html>dash</html>"
+    # The dashboard served by ward live links back to the live screen.
+    app_d = server.create_app(m, live.meta(b, h),
+                              '<a class="brand" href="#dashboard" data-home>SW</a><nav><!--__LIVE_TAB__--><a>DASHBOARD</a></nav>')
+    page = app_d.test_client().get("/dashboard").get_data(as_text=True)
+    assert '<a href="/"' in page and 'href="/" data-home' in page
     # Without a built front end the root page explains how to build it.
     monkeypatch.setattr(server, "static_dir", lambda: tmp_path)
     app2 = server.create_app(m, live.meta(b, h))

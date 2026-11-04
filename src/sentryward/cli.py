@@ -83,7 +83,7 @@ def cmd_market(args, paths):
 def cmd_live(args, paths):
     import webbrowser
 
-    from . import live, realtime, server
+    from . import live, realtime, server, youtube
 
     con = _connect(paths)
     for t in ("stock_crowding", "market", "prices"):
@@ -118,8 +118,10 @@ def cmd_live(args, paths):
             feed.start()
     monitor.start()
     db_path = str(paths.db)
+    yt_key = youtube.youtube_key()
     app = server.create_app(monitor, live.meta(baskets, hist), html,
-                            connect=lambda: duckdb.connect(db_path, read_only=True))
+                            connect=lambda: duckdb.connect(db_path, read_only=True),
+                            yt=youtube.YouTube(yt_key) if yt_key else None)
     url = f"http://{'localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host}:{args.port}/"
     sig = hist["sigma"]
     print(f"Live mode: {len(baskets['crowded'])} crowded stocks vs {len(baskets['peers'])} matched peers "
@@ -134,6 +136,8 @@ def cmd_live(args, paths):
     else:
         print(f"Quotes every {interval} s from Yahoo Finance (delayed about 15 minutes). "
               "Set APCA_API_KEY_ID and APCA_API_SECRET_KEY for real-time prices and news.")
+    print("Live TV: channel links and relevant videos on (YouTube key set)." if yt_key else
+          "Live TV: paste live links. Set YOUTUBE_API_KEY to add channels by @name and auto-find relevant videos.")
     print(f"Open {url}   ·   full dashboard at {url}dashboard   ·   Ctrl+C to stop")
     if not args.no_browser:
         webbrowser.open(url)

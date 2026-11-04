@@ -157,3 +157,30 @@ export function newsMarks(path, items, todayIso) {
   }
   return [...marks].map(([i, items]) => ({ i, items }));
 }
+
+/** The channel ID in a YouTube channel link ("UC" + 22 characters), or null. */
+export function channelIdOf(link) {
+  const m = /youtube\.com\/channel\/(UC[\w-]{22})/.exec(link || "") || /^(UC[\w-]{22})$/.exec((link || "").trim());
+  return m ? m[1] : null;
+}
+
+/** A YouTube embed URL with the player API turned on, so the page can tell when a video ends or fails. */
+export function playerUrl(embed, origin) {
+  if (!embed) return null;
+  return `${embed}${embed.includes("?") ? "&" : "?"}enablejsapi=1&origin=${encodeURIComponent(origin || "")}`;
+}
+
+/**
+ * Stocks worth a video search: news in the last `minutes` and a move against peers of at least
+ * `minRel` either way. Largest move first.
+ */
+export function videoTriggers(stocks, recentNews, refMs, minRel = 0.015, minutes = 60) {
+  const out = [];
+  for (const s of stocks || []) {
+    if (!isNum(s.rel) || Math.abs(s.rel) < minRel) continue;
+    const items = (recentNews[normTicker(s.symbol || s.ticker)] || [])
+      .filter((n) => refMs - Date.parse(n.created_at) <= minutes * 60e3);
+    if (items.length) out.push({ ticker: s.ticker, issuer: s.issuer, rel: s.rel, headline: items[0].headline });
+  }
+  return out.sort((a, b) => Math.abs(b.rel) - Math.abs(a.rel));
+}

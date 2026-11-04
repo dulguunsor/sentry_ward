@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { nyTime, stockHref, youtubeEmbed } from "./lib.js";
+import { nyTime, stockHref } from "./lib.js";
 
 const STATUS = {
   live: ["LIVE", "up"], starting: ["CONNECTING", "or"], reconnecting: ["RECONNECTING", "or"], error: ["ERROR", "down"],
@@ -66,52 +66,6 @@ export function NewsPanel({ news }) {
           {" "}News next to a price move may or may not be the reason for it.
         </div>
       </div>
-    </div>
-  );
-}
-
-const VIDEO_KEY = "sentryward.video";
-const loadVideo = () => { try { return localStorage.getItem(VIDEO_KEY) || ""; } catch { return ""; } };
-const saveVideo = (v) => { try { localStorage.setItem(VIDEO_KEY, v); } catch { /* storage unavailable */ } };
-
-/** A news channel's official live stream, played through YouTube's own embedded player. */
-export function VideoPanel() {
-  const [link, setLink] = useState(loadVideo);
-  const [draft, setDraft] = useState(link);
-  const [open, setOpen] = useState(true);
-  const src = youtubeEmbed(link);
-  const bad = draft.trim() && !youtubeEmbed(draft);
-  const apply = (e) => { e.preventDefault(); if (!bad) { setLink(draft.trim()); saveVideo(draft.trim()); } };
-  return (
-    <div className="panel c-side">
-      <div className="ph">
-        <h2>LIVE TV</h2>
-        <button type="button" className="more" onClick={() => setOpen((o) => !o)}>{open ? "HIDE" : "SHOW"}</button>
-      </div>
-      {open && (
-        <div className="pb">
-          <form className="vform" onSubmit={apply}>
-            <input type="url" value={draft} onChange={(e) => setDraft(e.target.value)} aria-label="YouTube live link"
-              placeholder="Paste a YouTube live stream link" />
-            <button type="submit" className="more" disabled={!!bad}>PLAY</button>
-          </form>
-          {bad && <div className="note down">That doesn't look like a YouTube video or channel link.</div>}
-          {src ? (
-            <div className="video">
-              <iframe src={src} title="Live news stream" allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
-                allowFullScreen referrerPolicy="strict-origin-when-cross-origin" />
-            </div>
-          ) : (
-            <div className="empty">
-              Open a financial news channel's live stream on YouTube, copy its link and paste it here. It starts muted.
-            </div>
-          )}
-          <div className="note">
-            Plays through YouTube's player, with the channel's own branding and ads. Some channels don't allow
-            embedding; if the player says so, use another stream. Your choice is remembered in this browser.
-          </div>
-        </div>
-      )}
     </div>
   );
 }

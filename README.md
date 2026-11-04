@@ -12,7 +12,7 @@
 
 ![Sentry Ward dashboard](docs/dashboard.png)
 
-**[Open the dashboard](https://dulguuntsatsralt-cell.github.io/Sentry-Ward/)**: the latest quarter, published with GitHub Pages.
+**[Open the dashboard](https://dulguunsor.github.io/Sentry-Ward/)**: the latest quarter, published with GitHub Pages.
 
 ## About
 
@@ -138,6 +138,7 @@ With a free [Alpaca](https://alpaca.markets) account (a paper trading account is
 |---|---|
 | `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY` | Prices every second and a live news feed |
 | `ANTHROPIC_API_KEY` (optional) | One or two sentence summaries for headlines that arrive without one |
+| `YOUTUBE_API_KEY` (optional) | Live TV: add channels by @name and find relevant videos automatically |
 
 - **Prices** update every second during market hours (9:30 to 16:00 New York time). The
   server pushes each update to the browser, so the numbers, chart and table move on
@@ -150,8 +151,15 @@ With a free [Alpaca](https://alpaca.markets) account (a paper trading account is
   shows the headline, a short summary and a link, never the article text. Headlines about
   tracked stocks are highlighted, flagged in the table (**N**) and marked on the
   intraday chart. A headline next to a price move may or may not be its cause.
-- **Live TV:** paste a news channel's YouTube live link into the panel. It plays through
-  YouTube's own player, muted at first, and the choice is remembered in your browser.
+- **Table:** values flash light green when they rise and light red when they fall.
+- **Live TV:** add news channels' YouTube live links, then change channel with CH ▲ ▼ or
+  the arrow keys. Streams play through YouTube's own player, muted at first, and your
+  channel list is remembered in your browser. With `YOUTUBE_API_KEY` (free from Google
+  Cloud), you can add a channel by its @name, and when a crowded stock has fresh news and
+  moves at least 1.5% against its peers, the panel looks for a recent video about that
+  company on your channels. It offers it (WATCH / DISMISS), or with **AUTO** on plays it
+  and returns to live when it ends. Searches are cached and capped well under YouTube's
+  free daily quota.
 - Options: `--source auto|alpaca|yahoo` (default `auto`) and `--tick SECONDS` (default 1).
 
 Stock and fund pages:
@@ -168,6 +176,7 @@ Stock and fund pages:
 | Part | Built with | Where |
 |---|---|---|
 | Real-time prices, news feed, summaries | Python, Alpaca REST and WebSocket APIs, Claude API | `src/sentryward/realtime.py` |
+| Live TV look-ups | YouTube Data API | `src/sentryward/youtube.py` |
 | Push to the browser (`/api/stream`) | Flask, server-sent events | `src/sentryward/server.py` |
 | Baskets, history, snapshot | Python, DuckDB | `src/sentryward/live.py` |
 | API (`/api/live`, `/api/meta`, `/api/search`, `/api/stock/<key>`, `/api/fund/<name>`) | Flask | `src/sentryward/server.py` |
@@ -185,6 +194,12 @@ npm run dev     # hot reload on port 5173, proxies the API to ward live on 8765
 npm test        # unit tests for formatting, scales and alert levels
 npm run build   # writes the built files into src/sentryward/web/live
 ```
+
+### Tab icon
+
+Save a square image as `src/sentryward/web/favicon.png` (or `favicon.svg` or `favicon.ico`).
+The live view shows it in the browser tab after a restart, and the dashboard embeds it the
+next time you run `ward dashboard`. Without one, browsers show their default icon.
 
 ## Docker
 
