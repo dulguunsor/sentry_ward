@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 
 import duckdb
@@ -83,7 +82,7 @@ def cmd_market(args, paths):
 def cmd_live(args, paths):
     import webbrowser
 
-    from . import live, realtime, server, youtube
+    from . import live, server
 
     con = _connect(paths)
     for t in ("stock_crowding", "market", "prices"):
@@ -102,42 +101,18 @@ def cmd_live(args, paths):
     con.close()  # release the database so other commands can run while live mode is on
 
     interval = max(60, args.interval)
-    prices = news = None
-    keys = realtime.alpaca_keys() if args.source != "yahoo" else None
-    if args.source == "alpaca" and keys is None:
-        raise SystemExit("Set APCA_API_KEY_ID and APCA_API_SECRET_KEY for real-time prices (free at alpaca.markets).")
-    if keys:
-        client = realtime.AlpacaClient(*keys)
-        tracked = cs + ps + [stress.BENCHMARK]
-        prices = realtime.PriceFeed(tracked, client.snapshots, every=max(1.0, args.tick))
-        news = realtime.NewsFeed(tracked, client, anthropic_key=os.environ.get("ANTHROPIC_API_KEY", "").strip() or None)
-    monitor = live.LiveMonitor(baskets, hist, interval=interval, daily=daily, daily_fetcher=live.yahoo_daily,
-                               prices=prices, news=news)
-    for feed in (prices, news):
-        if feed is not None:
-            feed.start()
+    monitor = live.LiveMonitor(baskets, hist, interval=interval, daily=daily, daily_fetcher=live.yahoo_daily)
     monitor.start()
     db_path = str(paths.db)
-    yt_key = youtube.youtube_key()
     app = server.create_app(monitor, live.meta(baskets, hist), html,
-                            connect=lambda: duckdb.connect(db_path, read_only=True),
-                            yt=youtube.YouTube(yt_key) if yt_key else None)
+                            connect=lambda: duckdb.connect(db_path, read_only=True))
     url = f"http://{'localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host}:{args.port}/"
     sig = hist["sigma"]
     print(f"Live mode: {len(baskets['crowded'])} crowded stocks vs {len(baskets['peers'])} matched peers "
           f"(holdings {baskets['period']}).")
     print(f"Normal daily spread: {100 * sig:.2f}% (std over {hist['days']} days); alert at z <= {live.ALERT_Z}."
           if sig else "Not enough price history to size alerts.")
-    if prices is not None:
-        print(f"Real-time prices every {prices.every:g} s from Alpaca (IEX exchange), during market hours; "
-              f"charts filled in from Yahoo every {interval} s.")
-        print("Live news from Alpaca" + (", with summaries from Claude." if news.anthropic_key else
-                                          ". Set ANTHROPIC_API_KEY for summaries of items without one."))
-    else:
-        print(f"Quotes every {interval} s from Yahoo Finance (delayed about 15 minutes). "
-              "Set APCA_API_KEY_ID and APCA_API_SECRET_KEY for real-time prices and news.")
-    print("Live TV: channel links and relevant videos on (YouTube key set)." if yt_key else
-          "Live TV: paste live links. Set YOUTUBE_API_KEY to add channels by @name and auto-find relevant videos.")
+    print(f"Quotes every {interval} s from Yahoo Finance (delayed about 15 minutes).")
     print(f"Open {url}   ·   full dashboard at {url}dashboard   ·   Ctrl+C to stop")
     if not args.no_browser:
         webbrowser.open(url)
@@ -344,9 +319,6 @@ def main(argv=None):
     lv.add_argument("--interval", type=int, default=120, help="seconds between quote updates (min 60)")
     lv.add_argument("--top", type=int, default=30, help="size of the crowded basket")
     lv.add_argument("--no-browser", action="store_true", help="do not open a browser window")
-    lv.add_argument("--source", choices=["auto", "alpaca", "yahoo"], default="auto",
-                    help="auto: Alpaca real time when its keys are set, otherwise Yahoo delayed")
-    lv.add_argument("--tick", type=float, default=1.0, help="seconds between real-time price updates (min 1)")
     lv.set_defaults(fn=cmd_live)
 
     db = sub.add_parser("dashboard", help="write a self-contained HTML dashboard")

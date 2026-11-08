@@ -44,7 +44,7 @@ const Row = ({ color, label, v, cls }) => (
 );
 
 /** Crowded basket, matched peers and SPY over the selected range, with a hover crosshair. */
-export function PathChart({ path, since, marks = [] }) {
+export function PathChart({ path, since }) {
   const W = 900, H = 280, L = 62, R = 64, T = 14, B = 28;
   const n = path.length;
   const ys = extent(path.flatMap((p) => [p.crowded, p.peers, p.spy]));
@@ -54,17 +54,9 @@ export function PathChart({ path, since, marks = [] }) {
   const line = (k) => path.map((p, i) => (isNum(p[k]) ? `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p[k]).toFixed(1)}` : "")).join("");
   const last = path[n - 1] || {};
   const h = hover ? path[hover.i] : null;
-  // Headlines near the hovered bar (within two bars), newest first.
-  const near = hover ? marks.filter((m) => Math.abs(m.i - hover.i) <= 2).flatMap((m) => m.items).slice(0, 3) : [];
   return (
     <div className="chartbox" ref={ref} {...handlers}>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label={`Crowded basket and matched peers, return ${since}`}>
-        {marks.map((m) => (
-          <g key={`m${m.i}`}>
-            <line x1={x(m.i)} x2={x(m.i)} y1={T} y2={H - B} stroke={C.orange} strokeOpacity="0.18" strokeDasharray="2 3" />
-            <path d={`M${x(m.i)},${H - B - 9} l5,8 h-10 z`} fill={C.orange} />
-          </g>
-        ))}
         <Axis y={y} values={ticks(ys[0], ys[1], 4)} W={W} L={L} R={R} />
         {labelIndexes(n, 7).map((i) => (
           <text key={i} x={x(i)} y={H - 8} fill={C.dim} fontSize="11" textAnchor="middle">{path[i].t}</text>
@@ -94,10 +86,7 @@ export function PathChart({ path, since, marks = [] }) {
           <Row color={C.cyan} label="Peers" v={h.peers} />
           <Row color={C.dim} label="SPY" v={h.spy} />
           <div className="tiprow sep"><span>Crowded − peers</span><b className={isNum(h.spread) && h.spread < 0 ? "down" : "up"}>{pct(h.spread)}</b></div>
-          <div className="tipnote">{h.live ? "Live, real-time price · " : ""}Return {since}</div>
-          {near.map((n) => (
-            <div className="tipnews" key={n.id}><b>{(n.tracked || []).join(", ")}</b> {n.headline}</div>
-          ))}
+          <div className="tipnote">Return {since}</div>
         </>}
       </Tip>
     </div>

@@ -21,9 +21,8 @@ def _rows(con, sql: str, params: list | None = None) -> list[dict]:
 def _tickers(con) -> str:
     """CTE `tk(cusip, ticker)`: tickers from OpenFIGI where `ward market` has run."""
     if _has_table(con, "cusip_map"):
-        return ("tk AS (SELECT cusip, any_value(ticker) AS ticker, any_value(symbol) AS symbol FROM cusip_map "
-                "WHERE ticker IS NOT NULL GROUP BY cusip)")
-    return "tk AS (SELECT NULL::VARCHAR AS cusip, NULL::VARCHAR AS ticker, NULL::VARCHAR AS symbol WHERE false)"
+        return "tk AS (SELECT cusip, any_value(ticker) AS ticker FROM cusip_map WHERE ticker IS NOT NULL GROUP BY cusip)"
+    return "tk AS (SELECT NULL::VARCHAR AS cusip, NULL::VARCHAR AS ticker WHERE false)"
 
 
 def _latest(con) -> str | None:
@@ -74,9 +73,8 @@ def _resolve_stock(con, key: str) -> str | None:
     rows = con.execute(f"""
         WITH {_tickers(con)}
         SELECT f.issuer_id FROM fund_positions f LEFT JOIN tk USING (cusip)
-        WHERE NOT f.is_etf AND (upper(tk.ticker) = upper(?) OR upper(tk.symbol) = upper(?)
-                              OR f.issuer_id = ? OR f.cusip = upper(?))
-        ORDER BY f.period DESC, f.value_usd DESC LIMIT 1""", [key, key, key, key]).fetchall()
+        WHERE NOT f.is_etf AND (upper(tk.ticker) = upper(?) OR f.issuer_id = ? OR f.cusip = upper(?))
+        ORDER BY f.period DESC, f.value_usd DESC LIMIT 1""", [key, key, key]).fetchall()
     return rows[0][0] if rows else None
 
 
